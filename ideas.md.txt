@@ -1,0 +1,672 @@
+Да, получится. Новая Web Components-архитектура подходит для этого без перехода на React/Vue и без потери framework-agnostic подключения.
+
+## Что уже подходит в текущей версии
+
+В текущем пакете уже есть нужные места расширения:
+
+| Функция со скрина                     | Точка в текущей архитектуре              | Что нужно изменить                                                                          |
+| ------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Кнопки под сообщением                 | `granit-widget-message` + `quickReplies` | Перенести quick replies из общего блока в `message.actions[]`                               |
+| Прикрепление картинки                 | `attachButton` уже есть в composer       | Включить hidden file input, preview, upload flow                                            |
+| Особое сообщение “передали менеджеру” | `role="system"` уже есть                 | Добавить `variant="handoff"` и отдельный стиль                                              |
+| AI → manager handoff                  | `mapSiteWidgetResponse()`                | Маппить `automation.status=fallback/disabled` или новый `handoff` payload в handoff-message |
+| Mobile quick actions                  | `mobileActions` уже есть                 | Можно оставить как отдельный bottom rail                                                    |
+
+Backend flow уже правильно защищает публичный виджет: сначала сохраняется входящее сообщение, потом может запускаться AI, а AI reply показывается widget-у только после сохранения outbound-сообщения. Это важно сохранить и для файлов, и для handoff-событий.
+
+## 1. Кнопки, прикрепленные к сообщению
+
+Сейчас quick replies живут рядом с лентой сообщений. Для поведения как на скрине лучше сделать actions частью конкретного message object.
+
+### Новый shape сообщения во frontend domain
+
+```js
+{
+  id: "msg_...",
+  role: "assistant", // assistant | visitor | system
+  variant: "default", // default | handoff | notice | error
+  text: "Опишите задачу или выберите вариант ниже.",
+  disclosure: false,
+  status: "sent",
+  actions: [
+    {
+      id: "calculation",
+      type: "submit_text",
+      label: "Нужен расчет",
+      value: "Нужен расчет памятника с установкой"
+    },
+    {
+      id: "question",
+      type: "submit_text",
+      label: "Есть вопрос",
+      value: "Здравствуйте, у меня есть вопрос по заказу"
+    },
+    {
+      id: "catalog",
+      type: "submit_text",
+      label: "Хочу каталог",
+      value: "Хочу посмотреть каталог памятников"
+    }
+  ]
+}
+```
+
+### Поведение
+
+| Action type       | Что делает widget                          |
+| ----------------- | ------------------------------------------ |
+| `submit_text`     | Сразу отправляет текст как visitor message |
+| `set_draft`       | Подставляет текст в textarea               |
+| `open_url`        | Открывает ссылку                           |
+| `call`            | Открывает `tel:`                           |
+| `request_handoff` | Отправляет запрос менеджеру                |
+
+Главное правило: label и value рендерятся через `textContent`, без `innerHTML`.
+
+## 2. Прикрепление картинки
+
+UI сделать можно сразу. Полноценная отправка файла требует backend-контракта.
+
+### Frontend часть
+
+В Web Component добавляется:
+
+```html
+<input
+  id="fileInput"
+  type="file"
+  accept="image/jpeg,image/png,image/webp"
+  hidden
+/>
+```
+
+Composer flow:
+
+```text
+attach click
+  -> file input click
+  -> validate mime/size/count
+  -> create local preview URL
+  -> show preview chip above composer
+  -> upload file or attach upload token
+  -> send message with attachment metadata
+```
+
+### Frontend state
+
+```js
+{
+  draft: "Посмотрите, пожалуйста, похожий вариант",
+  attachments: [
+    {
+      clientAttachmentId: "att_...",
+      kind: "image",
+      fileName: "photo.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 742311,
+      previewUrl: "blob:...",
+      uploadStatus: "ready" // ready | uploading | uploaded | failed
+    }
+  ]
+}
+```
+
+### Варианты backend-интеграции
+
+| Вариант            | Как работает                                                                       | Оценка                                  |
+| ------------------ | ---------------------------------------------------------------------------------- | --------------------------------------- |
+| Two-step upload    | Widget получает upload URL/token, грузит файл, потом отправляет message с metadata | Лучший вариант                          |
+| Multipart endpoint | Widget отправляет text + file одним request                                        | Проще, но тяжелее для idempotency/retry |
+| Base64 в JSON      | Файл кладется прямо в request body                                                 | Не рекомендую                           |
+
+Рекомендуемый flow:
+
+```text
+file selected
+  -> POST /public/intake/site-widget/attachments
+  -> backend returns public_attachment_id + upload_url/upload_token
+  -> widget uploads file
+  -> POST /public/intake/site-widget/messages
+     with message.text + message.attachments[]
+```
+
+### Contract extension
+
+Текущий request фактически text-first. Для файлов лучше расширить message:
+
+```js
+{
+  schema_version: "site_widget.v1",
+  event_type: "site_widget.message_submitted",
+  idempotency_key: "...",
+  public_session_id: "...",
+  source: {
+    channel: "site_widget",
+    page_url: "...",
+    widget_instance_id: "memorial-main"
+  },
+  message: {
+    role: "visitor",
+    text: "Фото примера прикрепил",
+    content_type: "text_with_attachments",
+    attachments: [
+      {
+        public_attachment_id: "patt_...",
+        kind: "image",
+        file_name: "photo.jpg",
+        mime_type: "image/jpeg",
+        size_bytes: 742311
+      }
+    ]
+  }
+}
+```
+
+Если AI должен только принять фото и передать менеджеру, достаточно сохранить attachment для manager UI.
+Если AI должен анализировать изображение, backend должен передать media context в AI boundary и использовать model/provider с vision support. Виджет не должен сам анализировать картинку.
+
+## 3. Специальное сообщение “передали менеджеру”
+
+Это лучше сделать отдельным типом system message.
+
+### Frontend message
+
+```js
+{
+  id: "msg_...",
+  role: "system",
+  variant: "handoff",
+  text: "Передали менеджеру. Он подключится к диалогу и уточнит детали.",
+  icon: "user-check",
+  status: "sent"
+}
+```
+
+### CSS в `granit-widget-message.html`
+
+```css
+:host([role="system"][variant="handoff"]) {
+  --message-align: center;
+  --message-background: var(--sw-color-handoff, #fff3e4);
+  border-color: var(--sw-color-handoff-border, rgba(157, 128, 98, 0.32));
+  color: var(--sw-color-text, #27231f);
+  max-width: 94%;
+}
+
+:host([role="system"][variant="handoff"]) .handoff-icon {
+  display: inline-flex;
+}
+```
+
+### Когда показывать
+
+В текущем contract можно маппить так:
+
+| Backend response                                              | Widget message                             |
+| ------------------------------------------------------------- | ------------------------------------------ |
+| `automation.status="replied"`                                 | Assistant bubble                           |
+| `automation.status="fallback"` + `next_step="manager_review"` | Handoff system bubble                      |
+| `automation.status="disabled"`                                | Handoff/system review bubble               |
+| `reason="agent_reply_blocked"`                                | Handoff bubble: “Менеджер уже подключился” |
+| `reason="manager_requested"`                                  | Handoff bubble: “Передали менеджеру”       |
+
+Лучше не определять handoff по тексту AI-ответа. Надежнее, чтобы backend явно вернул `automation.next_step`, `automation.reason` или `handoff`.
+
+## 4. Response shape для message actions и handoff
+
+Для обратной совместимости можно оставить старые поля и добавить optional UI payload.
+
+```js
+{
+  public_session_id: "sws_...",
+  automation: {
+    status: "replied",
+    next_step: "ai_reply_shown",
+    disclosure: {
+      shown: true
+    },
+    reply: {
+      sender_role: "ai_assistant",
+      text: "Стоимость зависит от модели, размера и комплектации.",
+      ui: {
+        variant: "default",
+        actions: [
+          {
+            id: "attach-photo",
+            type: "set_draft",
+            label: "Прикреплю фото",
+            value: "Хочу приложить фото примера"
+          },
+          {
+            id: "manager",
+            type: "request_handoff",
+            label: "Позвать менеджера",
+            value: "Хочу, чтобы ответил менеджер"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Для handoff:
+
+```js
+{
+  public_session_id: "sws_...",
+  automation: {
+    status: "fallback",
+    next_step: "manager_review",
+    reason: "manager_requested",
+    handoff: {
+      shown: true,
+      text: "Передали менеджеру. Он подключится к диалогу и уточнит детали.",
+      variant: "handoff"
+    }
+  }
+}
+```
+
+Frontend `mapSiteWidgetResponse()` должен превратить это в normalized view model:
+
+```js
+{
+  status: "handoff",
+  publicSessionId: "sws_...",
+  messages: [
+    {
+      role: "system",
+      variant: "handoff",
+      text: "Передали менеджеру. Он подключится к диалогу и уточнит детали."
+    }
+  ],
+  raw: body
+}
+```
+
+## 5. Что нужно поменять в пакете
+
+Минимальный список файлов:
+
+```text
+shared/site-widget-domain.js
+  -> message.actions[]
+  -> message.attachments[]
+  -> variant
+  -> attachment reducer actions
+  -> handoff response mapping
+
+static/components/widget-message.html
+  -> action buttons area
+  -> attachment preview area
+  -> handoff variant styles
+
+static/components/widget-message.js
+  -> observedAttributes/data setters for variant/actions/attachments
+  -> dispatch message-action event
+
+static/components/granit-site-widget.html
+  -> hidden file input
+  -> selected attachments preview row near composer
+
+static/components/granit-site-widget.js
+  -> file input events
+  -> attachment validation
+  -> action click handling
+  -> submit with attachments
+
+static/api.js
+  -> optional uploadAttachment()
+  -> sendSiteWidgetMessage() with attachments metadata
+
+design.md
+  -> message actions
+  -> attachment chips
+  -> handoff notice
+  -> error states for failed upload
+```
+
+## 6. Состояния, которые надо добавить
+
+```text
+attachment.selected
+attachment.removed
+attachment.upload.started
+attachment.upload.succeeded
+attachment.upload.failed
+
+message.action.selected
+handoff.shown
+manager.takeover.detected
+```
+
+Для UX это даст:
+
+```text
+visitor selects image
+  -> preview appears
+  -> image upload starts
+  -> send disabled while required upload is pending
+  -> message submitted with attachment metadata
+  -> backend saves inbound
+  -> AI replies or handoff message appears
+```
+
+## 7. Ограничения, которые нужно зафиксировать
+
+| Ограничение       | Рекомендация                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| Размер файла      | 8–10 MB на файл                                                                               |
+| Количество        | 3–5 файлов за одно сообщение                                                                  |
+| Типы              | `image/jpeg`, `image/png`, `image/webp`                                                       |
+| Хранение          | Не хранить файл в `localStorage`                                                              |
+| Preview           | `URL.createObjectURL(file)` и `URL.revokeObjectURL()` после удаления/unmount                  |
+| Security          | Сервер повторно проверяет MIME, размер и расширение                                           |
+| AI image analysis | Только через backend/provider, не в browser widget                                            |
+| Retry             | `idempotency_key` относится к message submit, upload должен иметь свой `client_attachment_id` |
+
+## Итог
+
+Функционал со скрина укладывается в выбранную архитектуру. Для UI-части достаточно расширить message model, `granit-widget-message` и composer. Для реальной отправки картинок нужен backend slice: upload endpoint, attachment metadata в public contract, сохранение attachment rows и отображение в manager UI. Handoff-сообщение можно сделать уже сейчас как `role="system" + variant="handoff"`, а затем привязать к явному backend payload.
+Да. Это нормально ложится в текущую Web Component-архитектуру. Нужно добавить **public sender profile** в contract и научить `granit-widget-message` рисовать автора сообщения.
+
+Ключевое правило: виджет не должен сам угадывать менеджера. Имя, фото и статус подключения должны приходить с backend-а как display-safe данные. Текущий backend flow уже держит public boundary: widget получает только public ids и безопасный response, без internal `leadId` / `conversationId`; это правило надо сохранить и для менеджера.
+
+## Как это должно выглядеть в модели сообщения
+
+```js
+{
+  id: "msg_...",
+  role: "manager", // visitor | ai_assistant | manager | system
+  variant: "default",
+  text: "Здравствуйте, я посмотрю задачу и уточню стоимость.",
+  createdAt: "2026-05-28T12:10:00.000Z",
+  sender: {
+    type: "manager",
+    displayName: "Алексей",
+    roleTitle: "Менеджер",
+    avatarUrl: "https://cdn.example.com/public/avatars/mgr_alexey.webp",
+    avatarAlt: "Алексей, менеджер",
+    initials: "А"
+  }
+}
+```
+
+Для AI:
+
+```js
+{
+  role: "ai_assistant",
+  text: "Стоимость зависит от модели, размера и комплектации.",
+  sender: {
+    type: "ai_assistant",
+    displayName: "Помощник",
+    roleTitle: "Онлайн",
+    avatarUrl: null,
+    initials: "AI"
+  }
+}
+```
+
+Для system handoff:
+
+```js
+{
+  role: "system",
+  variant: "handoff",
+  text: "К разговору подключился менеджер Алексей.",
+  sender: {
+    type: "system"
+  },
+  handoff: {
+    manager: {
+      displayName: "Алексей",
+      roleTitle: "Менеджер",
+      avatarUrl: "https://cdn.example.com/public/avatars/mgr_alexey.webp",
+      initials: "А"
+    }
+  }
+}
+```
+
+## Что менять во frontend-пакете
+
+```text
+shared/site-widget-domain.js
+  -> добавить sender profile в normalized message
+  -> добавить role="manager"
+  -> добавить handoff.manager mapping
+
+static/components/widget-message.html
+  -> avatar slot
+  -> sender name row
+  -> role title / timestamp row
+
+static/components/widget-message.js
+  -> set message.sender
+  -> безопасно выставлять img.src
+  -> fallback initials если avatarUrl нет
+
+static/components/granit-site-widget.html
+  -> header может показывать активного менеджера
+  -> message list показывает avatar/name у manager/ai messages
+
+static/components/granit-site-widget.js
+  -> render sender profile
+  -> обновлять header profile после handoff/manager message
+
+design.md
+  -> описать manager avatar
+  -> описать sender name
+  -> описать AI/manager/system visual variants
+```
+
+## UI-правила
+
+| Ситуация                    | Что показывать                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| До передачи менеджеру       | Header: “Поможем с заказом”, avatar бренда или AI                                     |
+| AI отвечает                 | Bubble от “Помощник”, можно с маленьким AI/avatar badge                               |
+| Передача менеджеру началась | System bubble: “Передали менеджеру”                                                   |
+| Менеджер назначен           | System bubble: “К разговору подключился Алексей”                                      |
+| Менеджер пишет сообщение    | Bubble с фото, именем и ролью                                                         |
+| Фото нет                    | Кружок с инициалами                                                                   |
+| Имя нет                     | “Менеджер”                                                                            |
+| Менеджер сменился           | Новые сообщения показывают нового менеджера; старые лучше оставить со старым snapshot |
+
+## Contract extension для handoff
+
+Для текущего `SiteWidgetResponse` можно добавить optional block:
+
+```json
+{
+  "automation": {
+    "status": "fallback",
+    "next_step": "manager_review",
+    "reason": "manager_requested",
+    "handoff": {
+      "shown": true,
+      "text": "Передали менеджеру. Он подключится к диалогу и уточнит детали.",
+      "variant": "handoff",
+      "assigned_manager": {
+        "display_name": "Алексей",
+        "role_title": "Менеджер",
+        "avatar_url": "https://cdn.example.com/public/avatars/mgr_alexey.webp",
+        "initials": "А"
+      }
+    }
+  }
+}
+```
+
+Если менеджер еще не назначен:
+
+```json
+{
+  "automation": {
+    "status": "fallback",
+    "next_step": "manager_review",
+    "handoff": {
+      "shown": true,
+      "text": "Передали менеджеру. Он подключится к диалогу и уточнит детали.",
+      "assigned_manager": null
+    }
+  }
+}
+```
+
+## Contract для настоящих сообщений менеджера
+
+Если менеджер отвечает не сразу в рамках того же `POST /messages`, а позже из manager UI, одного request/response уже мало. Тогда нужен endpoint получения новых сообщений.
+
+Минимальный вариант:
+
+```text
+GET /public/intake/site-widget/sessions/:public_session_id/messages?cursor=...
+```
+
+Response:
+
+```json
+{
+  "public_session_id": "sws_...",
+  "cursor": "cur_...",
+  "messages": [
+    {
+      "public_message_id": "pm_...",
+      "sender_role": "manager",
+      "text": "Здравствуйте, я посмотрю задачу.",
+      "created_at": "2026-05-28T12:10:00.000Z",
+      "sender_profile": {
+        "display_name": "Алексей",
+        "role_title": "Менеджер",
+        "avatar_url": "https://cdn.example.com/public/avatars/mgr_alexey.webp",
+        "initials": "А"
+      }
+    }
+  ]
+}
+```
+
+Для live-режима лучше позже добавить SSE:
+
+```text
+GET /public/intake/site-widget/sessions/:public_session_id/events
+```
+
+Но первый рабочий slice можно сделать через polling каждые 5–10 секунд после handoff.
+
+## Что хранить на backend-е
+
+Лучше не тянуть профиль менеджера напрямую из приватной user table в public response каждый раз. Нужен public snapshot.
+
+```text
+manager_profiles
+  -> user_id
+  -> public_display_name
+  -> public_role_title
+  -> public_avatar_asset_id
+  -> public_avatar_url
+  -> is_publicly_visible
+
+conversation_messages
+  -> sender_role
+  -> sender_user_id nullable
+  -> sender_public_profile_snapshot jsonb
+```
+
+Почему snapshot полезен:
+
+| Причина                             | Последствие                                                       |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| Менеджер поменял имя                | Старые сообщения не меняют автора задним числом                   |
+| Менеджер удалил фото                | История диалога остается стабильной                               |
+| В диалоге участвовали два менеджера | Каждое сообщение показывает правильного отправителя               |
+| Public avatar URL изменился         | Старые сообщения можно оставить как были или мигрировать отдельно |
+
+## Безопасность для фото
+
+| Риск                               | Решение                                               |
+| ---------------------------------- | ----------------------------------------------------- |
+| Утечка internal user id            | Не отдавать `user_id`; максимум public participant id |
+| Приватное фото                     | Отдавать только фото, отмеченное как public           |
+| Сломанная ссылка                   | Fallback initials                                     |
+| XSS через имя                      | Рендерить через `textContent`                         |
+| Непроверенный avatar URL           | Разрешить только CDN/assets домены                    |
+| Трекинг через сторонний avatar URL | Не отдавать внешние URL; проксировать через свой CDN  |
+| Кеширование                        | `Cache-Control` для public avatar assets              |
+
+## Как это будет выглядеть в Web Component
+
+В `widget-message`:
+
+```html
+<div part="sender-avatar" class="avatar">
+  <img part="sender-avatar-image" hidden />
+  <span part="sender-avatar-initials"></span>
+</div>
+
+<div part="message-content" class="content">
+  <div part="sender-meta" class="sender-meta">
+    <span part="sender-name"></span>
+    <span part="sender-role"></span>
+  </div>
+
+  <div part="message-bubble" class="bubble"></div>
+</div>
+```
+
+В JS:
+
+```js
+setSenderProfile(sender) {
+  this.senderNameNode.textContent = sender?.displayName || "";
+  this.senderRoleNode.textContent = sender?.roleTitle || "";
+
+  if (sender?.avatarUrl) {
+    this.avatarImageNode.src = sender.avatarUrl;
+    this.avatarImageNode.alt = sender.avatarAlt || sender.displayName || "Менеджер";
+    this.avatarImageNode.hidden = false;
+    this.avatarInitialsNode.hidden = true;
+    return;
+  }
+
+  this.avatarImageNode.hidden = true;
+  this.avatarInitialsNode.hidden = false;
+  this.avatarInitialsNode.textContent = sender?.initials || "М";
+}
+```
+
+## Дизайн-токены
+
+Добавить в `design.md` и `design-tokens.json`:
+
+```css
+granit-site-widget {
+  --sw-avatar-size: 36px;
+  --sw-avatar-size-header: 44px;
+  --sw-avatar-radius: 999px;
+  --sw-sender-name-font-size: 13px;
+  --sw-sender-name-font-weight: 600;
+  --sw-sender-role-font-size: 12px;
+  --sw-sender-role-color: rgba(39, 35, 31, 0.58);
+  --sw-manager-bubble-background: #ffffff;
+  --sw-manager-bubble-border: rgba(39, 35, 31, 0.08);
+}
+```
+
+## Итоговая схема поведения
+
+```text
+visitor sends message
+  -> backend saves inbound
+  -> AI replies or backend returns handoff
+  -> widget shows AI bubble or handoff system bubble
+  -> if manager is assigned, response includes public manager profile
+  -> widget updates header and future manager bubbles
+  -> manager messages arrive through polling/SSE
+  -> widget renders manager avatar + name per message
+```
+
+Это не ломает framework-agnostic Web Component. Меняется только public contract, domain mapper и message component. Для полноценного живого чата с менеджером дополнительно нужен backend-канал получения новых outbound manager messages.

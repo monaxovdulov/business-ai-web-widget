@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Granit Site Widget Loader Example</title>
+    <style>
+      body {
+        min-height: 100vh;
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #f7f3ef 0%, #ffffff 55%);
+        color: #2f2d2a;
+      }
+
+      main {
+        max-width: 900px;
+        padding: 64px 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Мемориальная мастерская</h1>
+      <p>Страница использует канонический loader artifact.</p>
+    </main>
+
+    <script
+      async
+      src="/site-widget/v1/loader.js"
+      data-granit-site-widget-loader
+      data-widget-instance-id="memorial-main"
+      data-api-base-url="https://ops.example.com"
+      data-theme="memorial-soft">
+    </script>
+  </body>
+</html>

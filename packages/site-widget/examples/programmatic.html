@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Granit Site Widget Programmatic Example</title>
+  </head>
+  <body>
+    <div id="widget-root"></div>
+
+    <script type="module">
+      import { defineSiteWidget, mountSiteWidget } from "/site-widget/v1/site-widget.esm.js";
+
+      defineSiteWidget();
+
+      mountSiteWidget({
+        target: document.querySelector("#widget-root"),
+        widgetInstanceId: "memorial-programmatic",
+        apiBaseUrl: "https://ops.example.com",
+        theme: "memorial-soft",
+        quickReplySubmit: "prefill"
+      });
+    </script>
+  </body>
+</html>

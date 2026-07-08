@@ -1,0 +1,1 @@
+{"version":3,"file":"widget-message.d.ts","sourceRoot":"","sources":["../../../src/components/widget-message.ts"],"names":[],"mappings":"AAAA,OAAO,EAAiB,KAAK,cAAc,EAAE,MAAM,KAAK,CAAC;AACzD,OAAO,KAAK,EAAE,gBAAgB,EAAE,aAAa,EAAE,MAAM,iBAAiB,CAAC;AAGvE,wBAAgB,mBAAmB,CAAC,OAAO,EAAE,aAAa,EAAE,MAAM,EAAE,gBAAgB,GAAG,cAAc,CAcpG"}

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Виджет Чата - Прототип</title>
+    
+    <!-- Подключение шрифта Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Подключение Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Настройка кастомных цветов Tailwind под макет -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            bg: '#fcfaf9',        // Чуть светлее фон для чистоты
+                            border: '#e8e2dd',    // Границы
+                            text: '#2d2926',      // Основной текст
+                            textMuted: '#8a827c', // Вторичный текст
+                            btnGradientFrom: '#e3d2c4', // Кнопка "Написать" старт
+                            btnGradientTo: '#cca98f',   // Кнопка "Написать" конец
+                            userMsgBg: '#ebd4c3', // Сообщение пользователя (более теплый оттенок)
+                            agentMsgBg: '#ffffff',// Сообщение оператора
+                            sendBtn: '#9f8573',   // Кнопка отправки
+                            quickReplyBg: '#ffffff',
+                            quickReplyBorder: '#e8e2dd'
+                        }
+                    },
+                    boxShadow: {
+                        'widget': '0 25px 50px -12px rgba(159, 133, 115, 0.25), 0 0 30px rgba(159, 133, 115, 0.05)',
+                        'floatingBtn': '0 10px 25px -5px rgba(204, 169, 143, 0.6)',
+                        'message': '0 4px 15px rgba(0,0,0,0.03)'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Подключение иконок Phosphor Icons (современные, контурные) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* Кастомный элегантный скроллбар вместо полного скрытия */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+            margin: 10px 0;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: rgba(159, 133, 115, 0.25);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(159, 133, 115, 0.4);
+        }
+        
+        /* Скрытие скроллбара только там, где он точно не нужен (напр. быстрые ответы) */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Плавные анимации появления */
+        .fade-in-up {
+            animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        /* Анимация пульсации статуса онлайн */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(76, 175, 80, 0); }
+            100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+        }
+        .animate-pulse-ring {
+            animation: pulse-ring 2s infinite cubic-bezier(0.66, 0, 0, 1);
+        }
+
+        /* Имитация фона сайта из макета */
+        body {
+            background-image: url('https://images.unsplash.com/photo-1470770841072-f978dac4d827?q=80&w=2000&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+        }
+        .bg-overlay {
+            background: linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.7) 100%);
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body class="h-screen w-full relative font-sans text-brand-text overflow-hidden">
+    <!-- Фоновый слой для имитации страницы -->
+    <div class="bg-overlay"></div>
+
+    <!-- Плавающая кнопка (Десктоп и Планшет) -->
+    <div class="fixed bottom-8 left-8 md:right-8 md:left-auto z-40 hidden md:flex flex-col items-start md:items-end gap-3 transition-all duration-300" id="closed-state-widget">
+        <!-- Подсказка (как на макете слева) -->
+        <div class="text-sm text-brand-textMuted bg-white/80 backdrop-blur px-4 py-2 rounded-xl shadow-sm border border-white/50 max-w-[200px] mb-2 md:text-right hidden xl:block">
+            Лёгкая кнопка, которая не отвлекает от контента сайта
+        </div>
+        
+        <button onclick="toggleChat(true)" class="bg-gradient-to-r from-brand-btnGradientFrom to-brand-btnGradientTo shadow-floatingBtn hover:scale-105 active:scale-95 transition-transform duration-200 rounded-full px-8 py-4 flex items-center gap-3 border border-white/40">
+            <i class="ph ph-chat-teardrop-text text-2xl text-[#4a3b32]"></i>
+            <span class="font-medium text-[#4a3b32] text-lg">Написать</span>
+        </button>
+    </div>
+
+    <!-- Мобильная нижняя панель (Отображается только на мобильных) -->
+    <div class="fixed bottom-4 left-4 right-4 z-40 md:hidden transition-all duration-300" id="mobile-quick-actions">
+        <div class="bg-brand-bg rounded-2xl shadow-widget border border-brand-border p-2 flex justify-between items-center">
+            <button class="flex-1 flex flex-col items-center justify-center py-2 gap-1 text-[#4a3b32] hover:bg-brand-border/50 rounded-xl transition-colors">
+                <i class="ph ph-phone text-xl"></i>
+                <span class="text-xs font-medium">Позвонить</span>
+            </button>
+            
+            <div class="w-px h-8 bg-brand-border mx-1"></div>
+            
+            <button onclick="toggleChat(true)" class="flex-1 flex flex-col items-center justify-center py-2 gap-1 text-[#4a3b32] hover:bg-brand-border/50 rounded-xl transition-colors">
+                <i class="ph ph-chat-teardrop-text text-xl"></i>
+                <span class="text-xs font-medium">Написать</span>
+            </button>
+            
+            <div class="w-px h-8 bg-brand-border mx-1"></div>
+            
+            <button class="flex-1 flex flex-col items-center justify-center py-2 gap-1 text-[#4a3b32] hover:bg-brand-border/50 rounded-xl transition-colors">
+                <i class="ph ph-calculator text-xl"></i>
+                <span class="text-xs font-medium">Расчет</span>
+            </button>
+        </div>
+        <p class="text-[10px] text-center text-brand-textMuted mt-3 px-4">
+            Отображается на мобильных устройствах внизу экрана и не мешает просмотру контента
+        </p>
+    </div>
+
+    <!-- Окно чата (Открытое состояние) -->
+    <div id="chat-window" class="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 w-[calc(100%-32px)] md:w-[480px] h-[calc(100vh-40px)] max-h-[850px] bg-brand-bg rounded-[2rem] shadow-widget border border-white/80 flex flex-col opacity-0 pointer-events-none translate-y-12 transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] overflow-hidden backdrop-blur-3xl">
+        
+        <!-- Шапка -->
+        <div class="px-7 py-6 flex items-center justify-between border-b border-brand-border bg-brand-bg/95 backdrop-blur-md relative z-10 shrink-0">
+            <div class="flex items-center gap-4">
+                <!-- Аватар/Логотип -->
+                <div class="w-14 h-14 rounded-full border border-brand-border bg-white flex items-center justify-center text-brand-textMuted shadow-sm relative">
+                    <i class="ph ph-mountains text-3xl"></i>
+                    <div class="absolute bottom-0.5 right-0.5 w-3 h-3 bg-[#4CAF50] rounded-full border-2 border-white animate-pulse-ring"></div>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-xl text-brand-text leading-tight tracking-tight">Поможем с заказом</h3>
+                    <div class="flex items-center gap-1.5 mt-1">
+                        <span class="text-sm text-brand-textMuted font-medium">Обычно отвечаем за 2 минуты</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Кнопки управления -->
+            <div class="flex items-center gap-2">
+                <button onclick="toggleChat(false)" class="w-10 h-10 rounded-full border border-brand-border bg-white flex items-center justify-center text-brand-textMuted hover:bg-[#f5f0ec] hover:text-brand-text transition-all duration-200">
+                    <i class="ph ph-minus text-lg"></i>
+                </button>
+                <button onclick="toggleChat(false)" class="w-10 h-10 rounded-full border border-brand-border bg-white flex items-center justify-center text-brand-textMuted hover:bg-[#f5f0ec] hover:text-brand-text transition-all duration-200">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Область сообщений -->
+        <div id="chat-body" class="flex-1 overflow-y-auto p-7 flex flex-col gap-6 custom-scrollbar relative z-0">
+            
+            <!-- Сообщение от оператора 1 -->
+            <div class="flex flex-col gap-1.5 items-start max-w-[85%]">
+                <div class="bg-brand-agentMsgBg border border-brand-border p-5 rounded-3xl rounded-tl-sm shadow-message text-base leading-relaxed text-brand-text">
+                    <strong>Здравствуйте! 👋</strong><br>
+                    Подскажем по памятнику, рассчитаем стоимость и оформим заказ дистанционно. Опишите задачу или выберите вариант ниже.
+                </div>
+                <span class="text-xs text-brand-textMuted ml-2 font-medium">11:42</span>
+            </div>
+
+            <!-- Быстрые ответы (Quick Replies) -->
+            <div class="flex gap-2.5 overflow-x-auto scrollbar-hide pb-3 -mt-2" id="quick-replies">
+                <button onclick="sendQuickReply(this)" class="shrink-0 px-5 py-2.5 bg-brand-quickReplyBg border border-brand-quickReplyBorder rounded-full text-[15px] font-medium text-brand-text hover:bg-[#f5f0ec] hover:shadow-sm transition-all duration-200">
+                    Нужен расчет
+                </button>
+                <button onclick="sendQuickReply(this)" class="shrink-0 px-5 py-2.5 bg-brand-quickReplyBg border border-brand-quickReplyBorder rounded-full text-[15px] font-medium text-brand-text hover:bg-[#f5f0ec] hover:shadow-sm transition-all duration-200">
+                    Есть вопрос
+                </button>
+                <button onclick="sendQuickReply(this)" class="shrink-0 px-5 py-2.5 bg-brand-quickReplyBg border border-brand-quickReplyBorder rounded-full text-[15px] font-medium text-brand-text hover:bg-[#f5f0ec] hover:shadow-sm transition-all duration-200">
+                    Хочу каталог
+                </button>
+            </div>
+
+            <!-- Сообщение пользователя -->
+            <div class="flex flex-col gap-1.5 items-end self-end max-w-[85%]">
+                <div class="bg-brand-userMsgBg p-5 rounded-3xl rounded-tr-sm shadow-message text-base leading-relaxed text-[#3d332c]">
+                    Сколько стоит памятник с установкой?
+                </div>
+                <div class="flex items-center gap-1.5 mr-2">
+                    <span class="text-xs text-brand-textMuted font-medium">11:43</span>
+                    <i class="ph-bold ph-check-all text-[15px] text-[#9f8573]"></i>
+                </div>
+            </div>
+
+            <!-- Сообщение от оператора 2 -->
+            <div class="flex flex-col gap-1.5 items-start max-w-[85%]">
+                <div class="bg-brand-agentMsgBg border border-brand-border p-5 rounded-3xl rounded-tl-sm shadow-message text-base leading-relaxed text-brand-text">
+                    Стоимость зависит от модели, размера и комплектации. Опишите, пожалуйста, какой памятник нужен, или приложите фото — подготовим расчет.
+                </div>
+                <span class="text-xs text-brand-textMuted ml-2 font-medium">11:43</span>
+            </div>
+            
+            <!-- Индикатор печати (скрыт по умолчанию) -->
+            <div id="typing-indicator" class="hidden flex-col gap-1.5 items-start max-w-[85%]">
+                <div class="bg-brand-agentMsgBg border border-brand-border px-5 py-4 rounded-3xl rounded-tl-sm shadow-message flex gap-1.5 items-center h-[52px]">
+                    <div class="w-2 h-2 bg-brand-textMuted/60 rounded-full animate-bounce" style="animation-delay: 0s"></div>
+                    <div class="w-2 h-2 bg-brand-textMuted/60 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                    <div class="w-2 h-2 bg-brand-textMuted/60 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Подвал виджета (Ввод и доп. действия) -->
+        <div class="bg-brand-bg px-7 py-5 border-t border-brand-border/60 shrink-0 z-10 relative">
+            
+            <!-- Поле ввода -->
+            <div class="flex items-center gap-4 relative">
+                <button class="text-brand-textMuted hover:text-brand-text hover:bg-brand-border/50 p-2 rounded-full transition-colors">
+                    <i class="ph ph-paperclip text-2xl rotate-45"></i>
+                </button>
+                
+                <div class="flex-1 bg-white border border-brand-border rounded-full flex items-center pr-1.5 pl-5 h-14 shadow-sm hover:shadow-md hover:border-[#dfccbd] focus-within:border-[#dfccbd] focus-within:shadow-md focus-within:ring-2 focus-within:ring-[#dfccbd]/20 transition-all duration-300">
+                    <input type="text" id="chat-input" placeholder="Напишите сообщение..." class="flex-1 bg-transparent border-none outline-none text-base text-brand-text placeholder:text-[#b8b0aa] h-full">
+                    <button onclick="sendUserMessage()" class="w-11 h-11 rounded-full bg-gradient-to-br from-brand-sendBtn to-[#8a7261] shadow-md text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all duration-200 shrink-0">
+                        <i class="ph-fill ph-paper-plane-right text-xl"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Добавить телефон -->
+            <button class="mt-5 flex items-center gap-2.5 text-[15px] text-[#9f8573] hover:text-[#8a7261] font-medium transition-colors group">
+                <div class="w-6 h-6 rounded-full bg-[#eeddd1]/50 flex items-center justify-center group-hover:bg-[#eeddd1] transition-colors">
+                    <i class="ph ph-plus text-sm"></i>
+                </div>
+                Добавить телефон для ответа
+            </button>
+
+            <div class="w-full h-px bg-brand-border/60 my-4"></div>
+
+            <!-- Дисклеймер -->
+            <div class="flex items-start gap-3 text-xs text-brand-textMuted leading-relaxed pb-1">
+                <i class="ph ph-shield-check text-lg shrink-0 text-[#9f8573]/70"></i>
+                <p>Расчет бесплатный. Точную стоимость подтвердит менеджер после уточнения деталей.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatWindow = document.getElementById('chat-window');
+        const closedWidget = document.getElementById('closed-state-widget');
+        const mobileActions = document.getElementById('mobile-quick-actions');
+        const chatBody = document.getElementById('chat-body');
+        const chatInput = document.getElementById('chat-input');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        // Функция форматирования времени
+        function getCurrentTime() {
+            const now = new Date();
+            let hours = now.getHours();
+            let minutes = now.getMinutes();
+            return `${hours}:${minutes < 10 ? '0' + minutes : minutes}`;
+        }
+
+        // Логика переключения состояний
+        function toggleChat(show) {
+            if (show) {
+                // Открытие
+                chatWindow.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-10');
+                closedWidget.classList.add('opacity-0', 'pointer-events-none', 'translate-y-4');
+                mobileActions.classList.add('opacity-0', 'pointer-events-none', 'translate-y-full');
+                
+                // Фокус на инпут с небольшой задержкой
+                setTimeout(() => chatInput.focus(), 300);
+                scrollToBottom();
+            } else {
+                // Закрытие
+                chatWindow.classList.add('opacity-0', 'pointer-events-none', 'translate-y-10');
+                closedWidget.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-4');
+                mobileActions.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-full');
+            }
+        }
+
+        // Прокрутка чата вниз
+        function scrollToBottom() {
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+
+        // Отправка сообщения пользователем (через кнопку или Enter)
+        function sendUserMessage(text = null) {
+            const message = text || chatInput.value.trim();
+            if (!message) return;
+
+            // HTML структура сообщения пользователя
+            const msgHtml = `
+                <div class="flex flex-col gap-1.5 items-end self-end max-w-[85%] fade-in-up">
+                    <div class="bg-brand-userMsgBg p-5 rounded-3xl rounded-tr-sm shadow-message text-base leading-relaxed text-[#3d332c]">
+                        ${message}
+                    </div>
+                    <div class="flex items-center gap-1.5 mr-2">
+                        <span class="text-xs text-brand-textMuted font-medium">${getCurrentTime()}</span>
+                        <i class="ph-bold ph-check text-[15px] text-[#9f8573]"></i>
+                    </div>
+                </div>
+            `;
+
+            // Вставляем перед индикатором печати
+            typingIndicator.insertAdjacentHTML('beforebegin', msgHtml);
+            
+            if (!text) {
+                chatInput.value = '';
+            }
+            
+            scrollToBottom();
+
+            // Имитация ответа оператора
+            simulateAgentResponse();
+        }
+
+        // Имитация ответа
+        function simulateAgentResponse() {
+            typingIndicator.classList.remove('hidden');
+            typingIndicator.classList.add('flex');
+            scrollToBottom();
+
+            setTimeout(() => {
+                typingIndicator.classList.add('hidden');
+                typingIndicator.classList.remove('flex');
+
+                const replyHtml = `
+                    <div class="flex flex-col gap-1.5 items-start max-w-[85%] fade-in-up">
+                        <div class="bg-brand-agentMsgBg border border-brand-border p-5 rounded-3xl rounded-tl-sm shadow-message text-base leading-relaxed text-brand-text">
+                            Спасибо за информацию. Специалист уже приступил к расчету, ответим в течение нескольких минут.
+                        </div>
+                        <span class="text-xs text-brand-textMuted ml-2 font-medium">${getCurrentTime()}</span>
+                    </div>
+                `;
+                
+                typingIndicator.insertAdjacentHTML('beforebegin', replyHtml);
+                scrollToBottom();
+
+                // Меняем галочку на "прочитано" у последнего сообщения юзера
+                const checkmarks = chatBody.querySelectorAll('.ph-check');
+                if (checkmarks.length > 0) {
+                    const lastCheck = checkmarks[checkmarks.length - 1];
+                    lastCheck.classList.remove('ph-check');
+                    lastCheck.classList.add('ph-check-all');
+                }
+            }, 1500);
+        }
+
+        // Обработка клика по быстрому ответу
+        function sendQuickReply(btnElement) {
+            const text = btnElement.innerText;
+            // Убираем панель быстрых ответов
+            const quickRepliesContainer = document.getElementById('quick-replies');
+            if (quickRepliesContainer) {
+                quickRepliesContainer.style.opacity = '0';
+                setTimeout(() => quickRepliesContainer.remove(), 300);
+            }
+            sendUserMessage(text);
+        }
+
+        // Слушатель Enter для поля ввода
+        chatInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendUserMessage();
+            }
+        });
+    </script>
+</body>
+</html>

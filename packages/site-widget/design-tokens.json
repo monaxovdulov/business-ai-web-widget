@@ -1,0 +1,49 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "siteWidget": {
+    "color": {
+      "accent": { "value": "#a98b6d" },
+      "accentText": { "value": "#ffffff" },
+      "surfacePanel": { "value": "#fffdf9" },
+      "surfaceRaised": { "value": "#ffffff" },
+      "surfaceVisitor": { "value": "#f1e7dd" },
+      "surfaceSystem": { "value": "#f7f3ee" },
+      "textPrimary": { "value": "#2f2d2a" },
+      "textSecondary": { "value": "#716d67" },
+      "textMuted": { "value": "#9b948c" },
+      "border": { "value": "rgba(55, 48, 40, 0.10)" },
+      "success": { "value": "#68c75a" },
+      "error": { "value": "#b84b3f" }
+    },
+    "space": {
+      "1": { "value": "4px" },
+      "2": { "value": "8px" },
+      "3": { "value": "12px" },
+      "4": { "value": "16px" },
+      "5": { "value": "20px" },
+      "6": { "value": "24px" }
+    },
+    "radius": {
+      "panel": { "value": "24px" },
+      "message": { "value": "16px" },
+      "button": { "value": "999px" },
+      "input": { "value": "999px" }
+    },
+    "size": {
+      "panelWidth": { "value": "640px" },
+      "panelWideWidth": { "value": "860px" },
+      "panelFullscreenInset": { "value": "24px" },
+      "panelMaxHeight": { "value": "min(760px, calc(100vh - 48px))" }
+    },
+    "shadow": {
+      "panel": { "value": "0 24px 80px rgba(28, 23, 18, 0.18)" },
+      "launcher": { "value": "0 14px 34px rgba(42, 32, 22, 0.18)" },
+      "rail": { "value": "0 12px 36px rgba(28, 23, 18, 0.12)" }
+    },
+    "font": {
+      "family": {
+        "value": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      }
+    }
+  }
+}

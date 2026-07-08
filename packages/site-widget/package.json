@@ -1,0 +1,49 @@
+{
+  "name": "@granit/site-widget",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Production Lit hybrid site widget exposed as a Web Component.",
+  "files": [
+    "dist",
+    "design.md",
+    "README.md",
+    "design-tokens.json",
+    "examples"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/site-widget.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/site-widget.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./site-widget.esm": "./dist/site-widget.esm.js",
+    "./iife": "./dist/site-widget.iife.js",
+    "./loader": "./dist/loader.js",
+    "./tokens": "./dist/design-tokens.json"
+  },
+  "sideEffects": [
+    "./dist/loader.js",
+    "./dist/site-widget.esm.js",
+    "./dist/site-widget.iife.js"
+  ],
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && node scripts/build.mjs && tsc -p tsconfig.types.json && node scripts/prepare-dist.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dev": "vite --host 127.0.0.1",
+    "serve:local": "node scripts/serve-local.mjs"
+  },
+  "dependencies": {
+    "lit": "^3.2.1"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "playwright": "^1.61.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.0.7",
+    "vitest": "^4.1.9"
+  }
+}
