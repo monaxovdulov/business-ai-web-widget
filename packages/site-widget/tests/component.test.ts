@@ -507,14 +507,20 @@ describe("granit-site-widget Lit component", () => {
       expect(imageEnvironment.createImageBitmap).not.toHaveBeenCalled();
       expect(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
 
-      imageEnvironment.createImageBitmap.mockRejectedValueOnce(new Error("decode failed"));
-      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("decode.png")]);
-      await vi.waitFor(() => {
-        expect(widget.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
-          "изображений не удалось прочитать"
-        );
-      });
-      expect(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
+      const imageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Image");
+      Object.defineProperty(globalThis, "Image", { configurable: true, value: undefined, writable: true });
+      try {
+        imageEnvironment.createImageBitmap.mockRejectedValueOnce(new Error("decode failed"));
+        selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("decode.png")]);
+        await vi.waitFor(() => {
+          expect(widget.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+            "изображений не удалось прочитать"
+          );
+        });
+        expect(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
+      } finally {
+        restoreProperty(globalThis, "Image", imageDescriptor);
+      }
 
       const closeBitmap = vi.fn();
       imageEnvironment.createImageBitmap.mockResolvedValueOnce({
@@ -837,6 +843,231 @@ describe("granit-site-widget Lit component", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(widget.shadowRoot?.querySelector('[part~="attachment"]')).toBeNull();
     } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("does not let a pre-clear submit send a new-session draft", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    let finishOldDecode: (bitmap: ImageBitmap) => void = () => undefined;
+    imageEnvironment.createImageBitmap.mockImplementationOnce(
+      () =>
+        new Promise<ImageBitmap>((resolve) => {
+          finishOldDecode = resolve;
+        })
+    );
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-submit-clear-boundary"
+      });
+      const requestMock = vi.fn().mockResolvedValue({
+        status: "replied",
+        replyText: "Не должно отправиться",
+        raw: { mock: true }
+      });
+      (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("old.png")]);
+      await vi.waitFor(() => expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(1));
+      widget.sendMessage("Старое сообщение");
+      expect(requestMock).not.toHaveBeenCalled();
+
+      widget.clearSession();
+      await widget.updateComplete;
+      const textarea = widget.shadowRoot?.querySelector<HTMLTextAreaElement>('.textarea');
+      if (textarea) {
+        textarea.value = "Новый черновик без отправки";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await widget.updateComplete;
+
+      finishOldDecode({ width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await widget.updateComplete;
+
+      expect(requestMock).not.toHaveBeenCalled();
+      expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(0);
+      expect(widget.shadowRoot?.querySelector<HTMLTextAreaElement>('.textarea')?.value).toBe(
+        "Новый черновик без отправки"
+      );
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("establishes a fresh runtime and storage boundary when widget-instance-id changes", async () => {
+    type DeferredResponse = {
+      status: "replied";
+      publicSessionId: string;
+      replyText: string;
+      raw: Record<string, unknown>;
+    };
+    let resolveOldResponse: (response: DeferredResponse) => void = () => undefined;
+    const oldResponse = new Promise<DeferredResponse>((resolve) => {
+      resolveOldResponse = resolve;
+    });
+    const requestMock = vi.fn(() => oldResponse);
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "boundary-a",
+      storage: "memory"
+    });
+    (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+    await widget.updateComplete;
+
+    widget.shadowRoot?.querySelector<HTMLButtonElement>('.contact-trigger')?.click();
+    await widget.updateComplete;
+    const phone = widget.shadowRoot?.querySelector<HTMLInputElement>('.phone-field');
+    if (phone) {
+      phone.value = "+7 999 111-22-33";
+      phone.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    widget.shadowRoot?.querySelector<HTMLButtonElement>('.phone-save')?.click();
+    widget.sendMessage("Запрос экземпляра A");
+    await vi.waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+
+    widget.setAttribute("widget-instance-id", "boundary-b");
+    widget.setAttribute("storage", "local");
+    await widget.updateComplete;
+    const boundaryBSession = localStorage.getItem("sw:boundary-b:public_session_id");
+    const transcriptTexts = (): string[] =>
+      [...(widget.shadowRoot?.querySelectorAll<HTMLElement>(".message__text, .marker__text") ?? [])].map(
+        (element) => element.textContent?.trim() ?? ""
+      );
+    expect(boundaryBSession).toMatch(/^sws_/);
+    expect.soft(transcriptTexts()).not.toContain("Запрос экземпляра A");
+
+    widget.shadowRoot?.querySelector<HTMLButtonElement>('.contact-trigger')?.click();
+    await widget.updateComplete;
+    expect.soft(widget.shadowRoot?.querySelector<HTMLInputElement>('.phone-field')?.value).toBe("");
+
+    resolveOldResponse({
+      status: "replied",
+      publicSessionId: "sws_stale_boundary_a",
+      replyText: "Старый ответ экземпляра A",
+      raw: { mock: true }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await widget.updateComplete;
+
+    expect(localStorage.getItem("sw:boundary-b:public_session_id")).toBe(boundaryBSession);
+    expect(transcriptTexts()).not.toContain("Старый ответ экземпляра A");
+    expect(transcriptTexts()).not.toContain("Запрос экземпляра A");
+  });
+
+  it("does not start a request after synchronous disconnect and restores a retryable state on reattach", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new DOMException("Disconnected before request", "AbortError"));
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "disconnect-before-request"
+    });
+    widget.addEventListener("granit-site-widget:message-submitted", () => widget.remove(), { once: true });
+    await widget.updateComplete;
+
+    widget.sendMessage("Сообщение перед disconnect");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    document.body.appendChild(widget);
+    await widget.updateComplete;
+
+    expect.soft(fetchMock).not.toHaveBeenCalled();
+    expect(widget.shadowRoot?.querySelectorAll('[part~="retry-button"]')).toHaveLength(1);
+    expect(widget.shadowRoot?.textContent).toContain("Не отправлено");
+  });
+
+  it("does not create an object URL when stale validation resumes after header read", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    const arrayBufferDescriptor = Object.getOwnPropertyDescriptor(Blob.prototype, "arrayBuffer");
+    let finishHeaderRead: (buffer: ArrayBuffer) => void = () => undefined;
+    const readHeader = vi.fn(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          finishHeaderRead = resolve;
+        })
+    );
+    Object.defineProperty(Blob.prototype, "arrayBuffer", {
+      configurable: true,
+      value: readHeader,
+      writable: true
+    });
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-stale-header"
+      });
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("stale.png")]);
+      await vi.waitFor(() => expect(readHeader).toHaveBeenCalledTimes(1));
+      widget.clearSession();
+      finishHeaderRead(
+        Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).buffer
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await widget.updateComplete;
+
+      expect.soft(imageEnvironment.createImageBitmap).not.toHaveBeenCalled();
+      expect.soft(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
+      expect(widget.shadowRoot?.querySelector('[part~="attachment"]')).toBeNull();
+    } finally {
+      restoreProperty(Blob.prototype, "arrayBuffer", arrayBufferDescriptor);
+      imageEnvironment.restore();
+    }
+  });
+
+  it("falls back to HTMLImage when createImageBitmap rejects and revokes the temporary URL", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    const imageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Image");
+    const decode = vi.fn().mockResolvedValue(undefined);
+    class DecodableImage {
+      decoding = "";
+      src = "";
+      naturalWidth = 1024;
+      naturalHeight = 768;
+      decode = decode;
+      addEventListener(): void {}
+    }
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      value: DecodableImage,
+      writable: true
+    });
+    imageEnvironment.createImageBitmap.mockRejectedValueOnce(new DOMException("Unsupported bitmap path", "NotSupportedError"));
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-image-fallback"
+      });
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("fallback.png")]);
+      const permanentUrl = await waitForDraftPreviewUrl(widget);
+      const temporaryUrl = imageEnvironment.createObjectURL.mock.results[0]?.value;
+
+      expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(1);
+      expect(decode).toHaveBeenCalledTimes(1);
+      expect(temporaryUrl).toMatch(/^blob:mock-/);
+      expect(permanentUrl).not.toBe(temporaryUrl);
+      expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(temporaryUrl);
+      expect(imageEnvironment.revokeObjectURL).not.toHaveBeenCalledWith(permanentUrl);
+    } finally {
+      restoreProperty(globalThis, "Image", imageDescriptor);
       imageEnvironment.restore();
     }
   });

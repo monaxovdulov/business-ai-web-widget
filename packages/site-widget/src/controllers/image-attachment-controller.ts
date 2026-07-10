@@ -33,6 +33,13 @@ type DecodedImageDimensions = {
   height: number;
 };
 
+class StaleImageSelectionError extends Error {
+  constructor() {
+    super("Image selection is no longer current");
+    this.name = "StaleImageSelectionError";
+  }
+}
+
 export class ImageAttachmentController implements ReactiveController {
   private readonly host: ReactiveControllerHost;
   private draft: DraftImageAttachment[] = [];
@@ -180,11 +187,13 @@ export class ImageAttachmentController implements ReactiveController {
     }
 
     const generation = selectionGeneration;
+    const isCurrent = (): boolean => generation === this.generation && this.enabled;
     const accepted: DraftImageAttachment[] = [];
     const rejections: ImageValidationRejection<ImageFileCandidate>[] = [];
     const acceptedForLimits = [...this.draft];
 
     for (const file of files) {
+      assertSelectionCurrent(isCurrent);
       const candidate: ImageFileCandidate = { file, sizeBytes: file.size };
       const limitError = validateImageLimits(candidate, acceptedForLimits);
       if (limitError) {
@@ -192,9 +201,9 @@ export class ImageAttachmentController implements ReactiveController {
         continue;
       }
 
-      const attachment = await this.validateAndCreateAttachment(candidate, rejections);
+      const attachment = await this.validateAndCreateAttachment(candidate, rejections, isCurrent);
       if (!attachment) continue;
-      if (generation !== this.generation || !this.enabled) {
+      if (!isCurrent()) {
         this.revokeInFlightPreview(attachment.previewUrl);
         break;
       }
@@ -202,7 +211,7 @@ export class ImageAttachmentController implements ReactiveController {
       acceptedForLimits.push(attachment);
     }
 
-    if (generation !== this.generation || !this.enabled) {
+    if (!isCurrent()) {
       for (const attachment of accepted) this.revokeInFlightPreview(attachment.previewUrl);
       return { accepted: 0, rejected: files.length, validationMessage: "" };
     }
@@ -221,12 +230,17 @@ export class ImageAttachmentController implements ReactiveController {
 
   private async validateAndCreateAttachment(
     candidate: ImageFileCandidate,
-    rejections: ImageValidationRejection<ImageFileCandidate>[]
+    rejections: ImageValidationRejection<ImageFileCandidate>[],
+    isCurrent: () => boolean
   ): Promise<DraftImageAttachment | undefined> {
+    assertSelectionCurrent(isCurrent);
     let detectedMime: AllowedImageMime | undefined;
     try {
-      detectedMime = detectImageMime(new Uint8Array(await readBlobArrayBuffer(candidate.file.slice(0, 12))));
-    } catch {
+      const header = await readBlobArrayBuffer(candidate.file.slice(0, 12));
+      assertSelectionCurrent(isCurrent);
+      detectedMime = detectImageMime(new Uint8Array(header));
+    } catch (error) {
+      if (error instanceof StaleImageSelectionError) throw error;
       rejections.push({ candidate, error: { code: "decode_failed" } });
       return undefined;
     }
@@ -253,13 +267,16 @@ export class ImageAttachmentController implements ReactiveController {
       dimensions = await decodeImage(
         candidate.file,
         (blob) => this.createInFlightPreview(blob),
-        (previewUrl) => this.revokeInFlightPreview(previewUrl)
+        (previewUrl) => this.revokeInFlightPreview(previewUrl),
+        isCurrent
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof StaleImageSelectionError) throw error;
       rejections.push({ candidate, error: { code: "decode_failed" } });
       return undefined;
     }
 
+    assertSelectionCurrent(isCurrent);
     const pixelError = validateImagePixelLimit(dimensions.width, dimensions.height);
     if (pixelError) {
       rejections.push({ candidate, error: pixelError });
@@ -268,8 +285,14 @@ export class ImageAttachmentController implements ReactiveController {
 
     let previewUrl: string;
     try {
+      assertSelectionCurrent(isCurrent);
       previewUrl = this.createInFlightPreview(candidate.file);
-    } catch {
+      if (!isCurrent()) {
+        this.revokeInFlightPreview(previewUrl);
+        throw new StaleImageSelectionError();
+      }
+    } catch (error) {
+      if (error instanceof StaleImageSelectionError) throw error;
       rejections.push({ candidate, error: { code: "decode_failed" } });
       return undefined;
     }
@@ -309,32 +332,49 @@ export class ImageAttachmentController implements ReactiveController {
 async function decodeImage(
   file: File,
   createTemporaryUrl: (blob: Blob) => string,
-  revokeTemporaryUrl: (previewUrl: string) => void
+  revokeTemporaryUrl: (previewUrl: string) => void,
+  isCurrent: () => boolean
 ): Promise<DecodedImageDimensions> {
+  let bitmapFailure: unknown;
   if (typeof createImageBitmap === "function") {
-    const bitmap = await createImageBitmap(file);
     try {
-      return { width: bitmap.width, height: bitmap.height };
-    } finally {
-      bitmap.close();
+      assertSelectionCurrent(isCurrent);
+      const bitmap = await createImageBitmap(file);
+      try {
+        assertSelectionCurrent(isCurrent);
+        return { width: bitmap.width, height: bitmap.height };
+      } finally {
+        bitmap.close();
+      }
+    } catch (error) {
+      if (error instanceof StaleImageSelectionError) throw error;
+      bitmapFailure = error;
     }
   }
 
+  assertSelectionCurrent(isCurrent);
   if (typeof Image === "undefined" || typeof URL.createObjectURL !== "function") {
-    throw new Error("No browser image decoder is available");
+    throw bitmapFailure instanceof Error ? bitmapFailure : new Error("No browser image decoder is available");
   }
 
+  assertSelectionCurrent(isCurrent);
   const temporaryUrl = createTemporaryUrl(file);
   try {
+    assertSelectionCurrent(isCurrent);
     const image = new Image();
     image.decoding = "async";
     image.src = temporaryUrl;
     if (typeof image.decode === "function") await image.decode();
     else await waitForImage(image);
+    assertSelectionCurrent(isCurrent);
     return { width: image.naturalWidth, height: image.naturalHeight };
   } finally {
     revokeTemporaryUrl(temporaryUrl);
   }
+}
+
+function assertSelectionCurrent(isCurrent: () => boolean): void {
+  if (!isCurrent()) throw new StaleImageSelectionError();
 }
 
 function waitForImage(image: HTMLImageElement): Promise<void> {

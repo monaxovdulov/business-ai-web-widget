@@ -6,13 +6,15 @@ export async function sendSiteWidgetMessage(
   request: SiteWidgetMessageRequest,
   signal?: AbortSignal
 ): Promise<SiteWidgetResponseViewModel> {
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   if (config.mock) return mockSiteWidgetMessage(config, request, signal);
   if (!config.apiBaseUrl) throw new Error("apiBaseUrl is required when mock=false");
 
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), config.timeoutMs);
   const abortForwarder = () => controller.abort();
-  signal?.addEventListener("abort", abortForwarder, { once: true });
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", abortForwarder, { once: true });
 
   try {
     const response = await fetch(`${config.apiBaseUrl}${config.messagesPath}`, {

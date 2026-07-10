@@ -48,6 +48,7 @@ export class GranitSiteWidgetElement extends LitElement {
   private sessionStore?: WidgetSessionStore;
   private publicSessionId = "";
   private abortController: AbortController | undefined;
+  private operationEpoch = 0;
   private readonly messageScroller = new MessageScrollerController(this);
   private readonly imageAttachments = new ImageAttachmentController(this);
   private sendMessageRequest = sendSiteWidgetMessage;
@@ -56,31 +57,46 @@ export class GranitSiteWidgetElement extends LitElement {
   private readonly phoneCaptureId = createClientId("sw-phone");
 
   override connectedCallback(): void {
+    const reconnecting = this.hasBooted;
     super.connectedCallback();
     this.boot();
+    if (reconnecting) this.requestUpdate();
   }
 
   override disconnectedCallback(): void {
-    this.abortController?.abort();
+    this.invalidateActiveWork(true);
     super.disconnectedCallback();
   }
 
   override attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (oldValue === newValue || !this.hasBooted) return;
 
-    const previousInstanceId = this.config.widgetInstanceId;
-    const previousStorage = this.config.storage;
+    const previousConfig = this.config;
     const previousPhotoPreviewEnabled = this.isPhotoPreviewEnabled();
     this.config = readConfigFromElement(this);
     this.syncHostAttributes();
     const photoPreviewEnabled = this.isPhotoPreviewEnabled();
-    if (previousPhotoPreviewEnabled && !photoPreviewEnabled) this.imageAttachments.clearAll();
-    this.imageAttachments.setEnabled(photoPreviewEnabled);
+    const sessionBoundaryChanged =
+      previousConfig.widgetInstanceId !== this.config.widgetInstanceId || previousConfig.storage !== this.config.storage;
+    const transportBoundaryChanged =
+      previousConfig.apiBaseUrl !== this.config.apiBaseUrl ||
+      previousConfig.messagesPath !== this.config.messagesPath ||
+      previousConfig.timeoutMs !== this.config.timeoutMs ||
+      previousConfig.mock !== this.config.mock;
+    const photoBoundaryChanged = previousPhotoPreviewEnabled !== photoPreviewEnabled;
 
-    if (previousInstanceId !== this.config.widgetInstanceId || previousStorage !== this.config.storage) {
+    if (sessionBoundaryChanged) {
+      const wasOpen = this.state.open;
+      this.invalidateActiveWork(false);
+      this.imageAttachments.clearAll();
       this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
       this.publicSessionId = this.sessionStore.getPublicSessionId();
+      this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
+      this.state = createWidgetState({ config: this.config, open: wasOpen });
+    } else if (transportBoundaryChanged || photoBoundaryChanged) {
+      this.invalidateActiveWork(true);
     }
+    this.imageAttachments.setEnabled(photoPreviewEnabled);
 
     if (name === "panel-size") {
       this.panelSize = this.config.panelSize;
@@ -120,8 +136,7 @@ export class GranitSiteWidgetElement extends LitElement {
   }
 
   clearSession(): void {
-    this.abortController?.abort();
-    this.abortController = undefined;
+    this.invalidateActiveWork(false);
     this.imageAttachments.clearAll();
     this.state = applyWidgetAction(this.state, { type: "session.cleared" }, this.config);
     this.sessionStore?.clearPublicSessionId();
@@ -568,14 +583,19 @@ export class GranitSiteWidgetElement extends LitElement {
   };
 
   private async submitDraft(): Promise<void> {
+    if (!this.isConnected) return;
+    const operationEpoch = this.operationEpoch;
     let text = this.state.draft.trim();
     if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
 
     if (this.isPhotoPreviewEnabled() && this.imageAttachments.isProcessing()) {
       await this.imageAttachments.whenIdle();
+      if (operationEpoch !== this.operationEpoch || !this.isConnected) return;
       text = this.state.draft.trim();
       if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
     }
+
+    if (operationEpoch !== this.operationEpoch || !this.isConnected) return;
 
     const idempotencyKey = createIdempotencyKey(this.publicSessionId);
     this.state = applyWidgetAction(this.state, { type: "submit.started", text, idempotencyKey }, this.config);
@@ -583,25 +603,29 @@ export class GranitSiteWidgetElement extends LitElement {
     if (!pending || pending.idempotencyKey !== idempotencyKey) return;
     if (this.isPhotoPreviewEnabled()) this.imageAttachments.transferDraftToMessage(pending.messageId);
     this.requestUpdate();
-    await this.sendPending(pending);
+    await this.sendPending(pending, operationEpoch);
   }
 
   private retryPending = async (messageId?: string): Promise<void> => {
     if (!this.state.pending || this.state.submitting) return;
     if (messageId && messageId !== this.state.pending.messageId) return;
     const pending = this.state.pending;
+    const operationEpoch = this.operationEpoch;
     this.state = applyWidgetAction(this.state, { type: "retry.started" }, this.config);
     this.requestUpdate();
-    await this.sendPending(pending);
+    await this.sendPending(pending, operationEpoch);
   };
 
-  private async sendPending(pending: PendingSubmission): Promise<void> {
+  private async sendPending(pending: PendingSubmission, operationEpoch: number): Promise<void> {
     this.abortController?.abort();
     const requestController = new AbortController();
     this.abortController = requestController;
     const { messageId, text, idempotencyKey } = pending;
     const isCurrentRequest = (): boolean =>
+      this.operationEpoch === operationEpoch &&
       this.abortController === requestController &&
+      !requestController.signal.aborted &&
+      this.isConnected &&
       this.state.pending?.messageId === messageId &&
       this.state.pending.idempotencyKey === idempotencyKey;
 
@@ -653,7 +677,7 @@ export class GranitSiteWidgetElement extends LitElement {
       });
       this.requestUpdate();
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof DOMException && error.name === "AbortError" && requestController.signal.aborted) return;
       if (!isCurrentRequest()) return;
       this.state = applyWidgetAction(
         this.state,
@@ -664,6 +688,22 @@ export class GranitSiteWidgetElement extends LitElement {
         errorMessage: error instanceof Error ? error.message : String(error)
       });
       this.requestUpdate();
+    } finally {
+      if (this.abortController === requestController) this.abortController = undefined;
+    }
+  }
+
+  private invalidateActiveWork(markPendingAsError: boolean): void {
+    this.operationEpoch += 1;
+    const activeController = this.abortController;
+    this.abortController = undefined;
+    activeController?.abort();
+    if (markPendingAsError && this.state.pending && this.state.submitting) {
+      this.state = applyWidgetAction(
+        this.state,
+        { type: "submit.failed", text: this.config.errorMessage, messageId: this.state.pending.messageId },
+        this.config
+      );
     }
   }
 
