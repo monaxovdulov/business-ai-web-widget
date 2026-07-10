@@ -198,4 +198,35 @@ describe("granit-site-widget Lit component", () => {
     expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(1);
     expect(requests[0]?.idempotency_key).toBe(requests[1]?.idempotency_key);
   });
+
+  it("announces the configured transport error in an atomic live region", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      errorMessage: "Связь потеряна. Повторите отправку.",
+      widgetInstanceId: "live-error"
+    });
+
+    await widget.updateComplete;
+    widget.sendMessage("Проверка связи");
+    await vi.waitFor(() => {
+      const live = widget.shadowRoot?.querySelector('[aria-live="polite"][aria-atomic="true"]');
+      expect(live?.textContent).toContain("Связь потеряна. Повторите отправку.");
+    });
+  });
+
+  it("does not apply an aborted mock response after clearSession", async () => {
+    const widget = mountSiteWidget({ mock: true, open: true, widgetInstanceId: "clear-race" });
+    await widget.updateComplete;
+
+    widget.sendMessage("Старое сообщение");
+    widget.clearSession();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await widget.updateComplete;
+
+    expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(0);
+    expect(widget.shadowRoot?.textContent).not.toContain("Старое сообщение");
+  });
 });

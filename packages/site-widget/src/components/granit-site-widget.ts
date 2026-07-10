@@ -2,7 +2,13 @@ import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { normalizeWidgetConfig, OBSERVED_CONFIG_ATTRIBUTES, readConfigFromElement } from "../domain/config";
 import { createIdempotencyKey } from "../domain/ids";
 import { buildSiteWidgetMessageRequest } from "../domain/request";
-import { applyWidgetAction, createWidgetState, validateDraft, type WidgetState } from "../domain/state";
+import {
+  applyWidgetAction,
+  createWidgetState,
+  validateDraft,
+  type PendingSubmission,
+  type WidgetState
+} from "../domain/state";
 import { buildWidgetViewModel } from "../domain/view-model";
 import { emitSiteWidgetEvent } from "../events/widget-events";
 import { readBrowserEnvironment } from "../services/browser-env";
@@ -37,7 +43,7 @@ export class GranitSiteWidgetElement extends LitElement {
   private hasBooted = false;
   private sessionStore?: WidgetSessionStore;
   private publicSessionId = "";
-  private abortController?: AbortController;
+  private abortController: AbortController | undefined;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -101,6 +107,7 @@ export class GranitSiteWidgetElement extends LitElement {
 
   clearSession(): void {
     this.abortController?.abort();
+    this.abortController = undefined;
     this.state = applyWidgetAction(this.state, { type: "session.cleared" }, this.config);
     this.sessionStore?.clearPublicSessionId();
     this.publicSessionId = this.sessionStore?.getPublicSessionId() ?? "";
@@ -112,6 +119,15 @@ export class GranitSiteWidgetElement extends LitElement {
     const effectivePanelSize = this.getEffectivePanelSize();
     const panelSizeButtonLabel = this.getPanelSizeButtonLabel();
     const panelSizeIconName = effectivePanelSize === "fullscreen" ? "minimize-2" : "maximize-2";
+    const pendingMessage = view.pending
+      ? view.messages.find((message) => message.id === view.pending?.messageId)
+      : undefined;
+    const liveStatus =
+      pendingMessage?.status === "error"
+        ? this.config.errorMessage
+        : pendingMessage?.status === "pending"
+          ? "Отправляем сообщение."
+          : "";
 
     return html`
       <button
@@ -281,6 +297,7 @@ export class GranitSiteWidgetElement extends LitElement {
             <span aria-hidden="true">${widgetIcon("shield", 18)}</span>
             <span>${this.config.footerNote}</span>
           </div>
+          <div class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">${liveStatus}</div>
         </div>
       </section>
     `;
@@ -466,22 +483,30 @@ export class GranitSiteWidgetElement extends LitElement {
 
     const idempotencyKey = createIdempotencyKey(this.publicSessionId);
     this.state = applyWidgetAction(this.state, { type: "submit.started", text, idempotencyKey }, this.config);
+    const pending = this.state.pending;
+    if (!pending || pending.idempotencyKey !== idempotencyKey) return;
     this.requestUpdate();
-    await this.sendPending(text, idempotencyKey);
+    await this.sendPending(pending);
   }
 
   private retryPending = async (messageId?: string): Promise<void> => {
     if (!this.state.pending || this.state.submitting) return;
     if (messageId && messageId !== this.state.pending.messageId) return;
-    const { text, idempotencyKey } = this.state.pending;
+    const pending = this.state.pending;
     this.state = applyWidgetAction(this.state, { type: "retry.started" }, this.config);
     this.requestUpdate();
-    await this.sendPending(text, idempotencyKey);
+    await this.sendPending(pending);
   };
 
-  private async sendPending(text: string, idempotencyKey: string): Promise<void> {
+  private async sendPending(pending: PendingSubmission): Promise<void> {
     this.abortController?.abort();
-    this.abortController = new AbortController();
+    const requestController = new AbortController();
+    this.abortController = requestController;
+    const { messageId, text, idempotencyKey } = pending;
+    const isCurrentRequest = (): boolean =>
+      this.abortController === requestController &&
+      this.state.pending?.messageId === messageId &&
+      this.state.pending.idempotencyKey === idempotencyKey;
 
     try {
       const request = buildSiteWidgetMessageRequest({
@@ -498,15 +523,17 @@ export class GranitSiteWidgetElement extends LitElement {
         publicSessionId: this.publicSessionId,
         messageText: text
       });
+      if (!isCurrentRequest()) return;
 
-      const response = await sendSiteWidgetMessage(this.config, request, this.abortController.signal);
+      const response = await sendSiteWidgetMessage(this.config, request, requestController.signal);
+      if (!isCurrentRequest()) return;
 
       if (response.publicSessionId) {
         this.publicSessionId = response.publicSessionId;
         this.sessionStore?.setPublicSessionId(response.publicSessionId);
       }
 
-      this.state = applyWidgetAction(this.state, { type: "visitor.persisted", text }, this.config);
+      this.state = applyWidgetAction(this.state, { type: "visitor.persisted", text, messageId }, this.config);
 
       if (response.status === "replied" && response.replyText) {
         this.state = applyWidgetAction(this.state, { type: "assistant.replied", text: response.replyText }, this.config);
@@ -530,7 +557,12 @@ export class GranitSiteWidgetElement extends LitElement {
       this.requestUpdate();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      this.state = applyWidgetAction(this.state, { type: "submit.failed", text: this.config.errorMessage }, this.config);
+      if (!isCurrentRequest()) return;
+      this.state = applyWidgetAction(
+        this.state,
+        { type: "submit.failed", text: this.config.errorMessage, messageId },
+        this.config
+      );
       emitSiteWidgetEvent(this, "error", this.config, {
         errorMessage: error instanceof Error ? error.message : String(error)
       });

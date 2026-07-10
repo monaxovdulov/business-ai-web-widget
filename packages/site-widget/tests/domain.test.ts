@@ -127,6 +127,31 @@ describe("site widget domain", () => {
     expect(blocked.messages).toHaveLength(initialLength + 1);
   });
 
+  it("ignores stale failures when there is no matching pending message", () => {
+    const config = normalizeWidgetConfig();
+    const initial = createWidgetState({ config, open: true });
+
+    const withoutPending = applyWidgetAction(
+      initial,
+      { type: "submit.failed", text: config.errorMessage, messageId: "msg_stale" },
+      config
+    );
+    expect(withoutPending).toEqual(initial);
+
+    let active = applyWidgetAction(
+      initial,
+      { type: "submit.started", text: "Актуальное", idempotencyKey: "idem_active" },
+      config
+    );
+    active = applyWidgetAction(
+      active,
+      { type: "submit.failed", text: config.errorMessage, messageId: "msg_stale" },
+      config
+    );
+    expect(active.submitting).toBe(true);
+    expect(active.messages.find((message) => message.id === active.pending?.messageId)?.status).toBe("pending");
+  });
+
   it("marks only the current pending visitor as persisted", () => {
     const config = normalizeWidgetConfig();
     let state = createWidgetState({ config, open: true });

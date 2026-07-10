@@ -6,7 +6,7 @@ export async function sendSiteWidgetMessage(
   request: SiteWidgetMessageRequest,
   signal?: AbortSignal
 ): Promise<SiteWidgetResponseViewModel> {
-  if (config.mock) return mockSiteWidgetMessage(config, request);
+  if (config.mock) return mockSiteWidgetMessage(config, request, signal);
   if (!config.apiBaseUrl) throw new Error("apiBaseUrl is required when mock=false");
 
   const controller = new AbortController();
@@ -40,9 +40,10 @@ export async function sendSiteWidgetMessage(
 
 export async function mockSiteWidgetMessage(
   config: SiteWidgetConfig,
-  request: SiteWidgetMessageRequest
+  request: SiteWidgetMessageRequest,
+  signal?: AbortSignal
 ): Promise<SiteWidgetResponseViewModel> {
-  await delay(350);
+  await delay(350, signal);
   const text = request.message.text.toLowerCase();
 
   if (text.includes("менеджер") || text.includes("позвон")) {
@@ -91,6 +92,18 @@ function readErrorMessage(body: unknown): string | undefined {
       : undefined;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, ms);
+    const handleAbort = () => {
+      globalThis.clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
 }

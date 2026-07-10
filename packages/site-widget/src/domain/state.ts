@@ -39,10 +39,10 @@ export type WidgetAction =
   | { type: "contact.phone.saved"; phone: string }
   | { type: "submit.started"; text: string; idempotencyKey: string }
   | { type: "retry.started" }
-  | { type: "visitor.persisted"; text: string }
+  | { type: "visitor.persisted"; text: string; messageId?: string }
   | { type: "assistant.replied"; text: string }
   | { type: "system.message"; text: string; status: "fallback" | "disabled" }
-  | { type: "submit.failed"; text: string }
+  | { type: "submit.failed"; text: string; messageId?: string }
   | { type: "session.cleared" };
 
 export function createWidgetState({
@@ -148,6 +148,7 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
 
     case "visitor.persisted": {
       if (!current.pending) return current;
+      if (action.messageId && action.messageId !== current.pending.messageId) return current;
       return {
         ...current,
         messages: current.messages.map((message) =>
@@ -175,6 +176,8 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
     }
 
     case "submit.failed": {
+      if (!current.pending) return current;
+      if (action.messageId && action.messageId !== current.pending.messageId) return current;
       const messages = current.messages.map((message) =>
         message.id === current.pending?.messageId ? { ...message, status: "error" as const } : message
       );
