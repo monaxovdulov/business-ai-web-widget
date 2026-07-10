@@ -70,7 +70,8 @@ export class MessageScrollerController implements ReactiveController {
   private observedRows = new Set<Element>();
   private frameId: number | undefined;
   private programmaticScroll = false;
-  private smoothClearTimer: number | undefined;
+  private programmaticClearTimer: number | undefined;
+  private settlingTimer: number | undefined;
   private pointerActive = false;
 
   constructor(host: ReactiveControllerHost) {
@@ -85,6 +86,10 @@ export class MessageScrollerController implements ReactiveController {
 
   hostDisconnected(): void {
     this.disconnect();
+  }
+
+  hostConnected(): void {
+    this.host.requestUpdate();
   }
 
   connect({ root, viewport, content, tailSpacer }: MessageScrollerElements): void {
@@ -113,6 +118,8 @@ export class MessageScrollerController implements ReactiveController {
       this.resizeObserver.observe(viewport);
       this.resizeObserver.observe(content);
       this.reconcileObservedRows();
+    } else if (typeof window !== "undefined") {
+      window.addEventListener("resize", this.handleWindowResize);
     }
 
     this.commitModeAttribute();
@@ -122,7 +129,7 @@ export class MessageScrollerController implements ReactiveController {
   reconcile(items: readonly MessageScrollerItem[]): void {
     const next = items.map((item) => ({ id: item.id, scrollAnchor: Boolean(item.scrollAnchor) }));
     const previous = this.pendingReconcile?.previous ?? this.items;
-    const layoutAnchor = this.pendingLayoutAnchor;
+    const layoutAnchor = this.pendingReconcile?.layoutAnchor ?? this.pendingLayoutAnchor;
     this.pendingLayoutAnchor = undefined;
     this.items = next;
     this.pendingReconcile = layoutAnchor ? { previous, next, layoutAnchor } : { previous, next };
@@ -138,18 +145,23 @@ export class MessageScrollerController implements ReactiveController {
     this.setTailHeight(0);
     this.newItemCount = 0;
     const behavior = this.normalizeBehavior(options.behavior ?? "auto");
+    this.clearSettlingTimer();
     this.mode = behavior === "smooth" ? "settling-jump" : "following-bottom";
     this.commitModeAttribute();
     this.performScroll(Math.max(0, viewport.scrollHeight - viewport.clientHeight), behavior);
     this.updateSnapshot();
 
     if (behavior === "smooth") {
-      this.clearSmoothTimer();
-      this.smoothClearTimer = globalThis.setTimeout(() => {
-        this.smoothClearTimer = undefined;
-        this.programmaticScroll = false;
+      this.settlingTimer = globalThis.setTimeout(() => {
+        this.settlingTimer = undefined;
+        if (this.mode !== "settling-jump") return;
         this.mode = "following-bottom";
         this.commitModeAttribute();
+        const currentViewport = this.viewport;
+        if (currentViewport && this.hasLayout()) {
+          this.performScroll(Math.max(0, currentViewport.scrollHeight - currentViewport.clientHeight), "auto");
+          this.scheduleCommit();
+        }
         this.updateSnapshot();
       }, SMOOTH_SCROLL_CLEAR_MS);
     }
@@ -165,6 +177,7 @@ export class MessageScrollerController implements ReactiveController {
     this.activeAnchorId = undefined;
     this.setTailHeight(0);
     this.newItemCount = 0;
+    this.clearSettlingTimer();
     this.mode = "free-scrolling";
     this.commitModeAttribute();
     const viewportRect = viewport.getBoundingClientRect();
@@ -178,7 +191,8 @@ export class MessageScrollerController implements ReactiveController {
   disconnect(): void {
     this.detachElements();
     this.cancelFrame();
-    this.clearSmoothTimer();
+    this.clearProgrammaticTimer();
+    this.clearSettlingTimer();
     this.pendingReconcile = undefined;
     this.pendingLayoutAnchor = undefined;
     this.activeAnchorId = undefined;
@@ -242,7 +256,7 @@ export class MessageScrollerController implements ReactiveController {
       } else {
         this.newItemCount += appended.length;
       }
-    } else if (this.mode === "following-bottom") {
+    } else if (this.mode === "following-bottom" || this.mode === "settling-jump") {
       this.performScroll(Math.max(0, viewport.scrollHeight - viewport.clientHeight), "auto");
     } else if (this.activeAnchorId) {
       this.reconcileActiveAnchor();
@@ -258,6 +272,7 @@ export class MessageScrollerController implements ReactiveController {
 
     this.activeAnchorId = messageId;
     this.newItemCount = 0;
+    this.clearSettlingTimer();
     this.mode = "anchored-to-message";
     this.commitModeAttribute();
     const desiredTop = this.desiredScrollTop(target);
@@ -343,18 +358,27 @@ export class MessageScrollerController implements ReactiveController {
     previous: readonly MessageScrollerItem[],
     next: readonly MessageScrollerItem[]
   ): readonly MessageScrollerItem[] {
-    if (next.length <= previous.length) return [];
-    for (let index = 0; index < previous.length; index += 1) {
-      if (previous[index]?.id !== next[index]?.id) return [];
-    }
-    return next.slice(previous.length);
+    if (previous.length === 0) return next;
+    const start = this.findSequenceStart(previous, next);
+    if (start < 0) return [];
+    return next.slice(start + previous.length);
   }
 
   private isPrepend(previous: readonly MessageScrollerItem[], next: readonly MessageScrollerItem[]): boolean {
     if (previous.length === 0 || next.length <= previous.length) return false;
-    const start = next.findIndex((item) => item.id === previous[0]?.id);
-    if (start <= 0 || start + previous.length > next.length) return false;
-    return previous.every((item, index) => item.id === next[start + index]?.id);
+    return this.findSequenceStart(previous, next) > 0;
+  }
+
+  private findSequenceStart(
+    previous: readonly MessageScrollerItem[],
+    next: readonly MessageScrollerItem[]
+  ): number {
+    if (previous.length === 0) return 0;
+    const maxStart = next.length - previous.length;
+    for (let start = 0; start <= maxStart; start += 1) {
+      if (previous.every((item, index) => item.id === next[start + index]?.id)) return start;
+    }
+    return -1;
   }
 
   private handleWheel = (): void => this.releaseForUser();
@@ -395,7 +419,8 @@ export class MessageScrollerController implements ReactiveController {
   };
 
   private releaseForUser(): void {
-    this.clearSmoothTimer();
+    this.clearProgrammaticTimer();
+    this.clearSettlingTimer();
     this.programmaticScroll = false;
     if (this.mode !== "free-scrolling") {
       this.mode = "free-scrolling";
@@ -419,14 +444,16 @@ export class MessageScrollerController implements ReactiveController {
 
   private markProgrammaticScroll(behavior: ScrollBehavior): void {
     this.programmaticScroll = true;
-    this.clearSmoothTimer();
+    this.clearProgrammaticTimer();
     const delay = behavior === "smooth" ? SMOOTH_SCROLL_CLEAR_MS : 0;
-    this.smoothClearTimer = globalThis.setTimeout(() => {
+    this.programmaticClearTimer = globalThis.setTimeout(() => {
       this.programmaticScroll = false;
-      this.smoothClearTimer = undefined;
+      this.programmaticClearTimer = undefined;
       this.updateSnapshot();
     }, delay);
   }
+
+  private handleWindowResize = (): void => this.scheduleCommit();
 
   private updateSnapshot(): void {
     const viewport = this.viewport;
@@ -522,6 +549,7 @@ export class MessageScrollerController implements ReactiveController {
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
+    if (typeof window !== "undefined") window.removeEventListener("resize", this.handleWindowResize);
     this.observedRows.clear();
     this.root = undefined;
     this.viewport = undefined;
@@ -529,10 +557,16 @@ export class MessageScrollerController implements ReactiveController {
     this.tailSpacer = undefined;
   }
 
-  private clearSmoothTimer(): void {
-    if (this.smoothClearTimer === undefined) return;
-    globalThis.clearTimeout(this.smoothClearTimer);
-    this.smoothClearTimer = undefined;
+  private clearProgrammaticTimer(): void {
+    if (this.programmaticClearTimer === undefined) return;
+    globalThis.clearTimeout(this.programmaticClearTimer);
+    this.programmaticClearTimer = undefined;
+  }
+
+  private clearSettlingTimer(): void {
+    if (this.settlingTimer === undefined) return;
+    globalThis.clearTimeout(this.settlingTimer);
+    this.settlingTimer = undefined;
   }
 
   private requestFrame(callback: FrameRequestCallback): number {

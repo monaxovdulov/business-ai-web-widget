@@ -220,6 +220,124 @@ test("остаётся работоспособным без ResizeObserver", as
   await expectAtEnd(page);
 });
 
+test("smooth latest с немедленным append и resize завершается в following-bottom", async ({ page }) => {
+  await reset(page, rows("message", 18, 64));
+  const viewport = page.getByTestId("viewport");
+
+  await viewport.hover();
+  await page.mouse.wheel(0, -420);
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+
+  await page.getByTestId("jump-latest").click();
+  await append(page, [{ id: "during-smooth-jump", height: 72 }]);
+  await page.evaluate(async () => {
+    await (window as FixtureWindow).messageScrollerFixture.setItemHeight("during-smooth-jump", 220);
+  });
+
+  await expect
+    .poll(async () => (await snapshot(page)).mode, { timeout: 1_000 })
+    .toBe("following-bottom");
+  await expectAtEnd(page);
+});
+
+test("detach и reinsert ReactiveController host восстанавливают user release и follow", async ({ page }) => {
+  await reset(page, rows("message", 18, 64));
+  await reinsertFixture(page);
+  const viewport = page.getByTestId("viewport");
+
+  await viewport.hover();
+  await page.mouse.wheel(0, -420);
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+
+  const beforeAppend = await metrics(page);
+  await append(page, [{ id: "after-reinsert", height: 72 }]);
+  expect(Math.abs((await metrics(page)).scrollTop - beforeAppend.scrollTop)).toBeLessThanOrEqual(1);
+
+  await page.getByTestId("jump-latest").click();
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "following-bottom");
+  await expectAtEnd(page);
+});
+
+test("window resize сохраняет live edge без ResizeObserver", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      value: undefined,
+      writable: true
+    });
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await waitForFixture(page);
+  await reset(page, rows("message", 16, 64));
+  await expectAtEnd(page);
+
+  await page.evaluate(() => {
+    const element = document.querySelector<HTMLElement>("message-scroller-fixture");
+    if (!element) throw new Error("MessageScroller fixture is unavailable");
+    element.style.setProperty("--fixture-viewport-height", "180px");
+    window.dispatchEvent(new Event("resize"));
+  });
+
+  await expect
+    .poll(async () => (await metrics(page)).distanceToEnd, { timeout: 1_000 })
+    .toBeLessThanOrEqual(8);
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "following-bottom");
+});
+
+test("touchmove и scrollbar pointer drag освобождают follow", async ({ page }) => {
+  await reset(page, rows("message", 18, 64));
+
+  await page.getByTestId("content").dispatchEvent("touchmove", {
+    touches: [],
+    targetTouches: [],
+    changedTouches: []
+  });
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+
+  await page.evaluate(async () => {
+    await (window as FixtureWindow).messageScrollerFixture.scrollToEnd({ behavior: "auto" });
+  });
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "following-bottom");
+
+  await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>("[data-testid='viewport']");
+    if (!viewport) throw new Error("MessageScroller viewport is unavailable");
+    const rect = viewport.getBoundingClientRect();
+    viewport.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        clientX: rect.right - 1,
+        clientY: rect.top + rect.height / 2,
+        pointerId: 1,
+        pointerType: "mouse"
+      })
+    );
+    viewport.scrollTop = Math.max(0, viewport.scrollTop - 180);
+    viewport.dispatchEvent(new Event("scroll"));
+    viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, pointerType: "mouse" }));
+  });
+
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+});
+
+test("batched prepend и append сохраняют reading position и считают suffix", async ({ page }) => {
+  await reset(page, rows("message", 22, 58));
+  const viewport = page.getByTestId("viewport");
+
+  await viewport.hover();
+  await page.mouse.wheel(0, -650);
+  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  const before = await metrics(page);
+  expect(before.firstVisible).not.toBeNull();
+
+  await batchedPrependAndAppend(page, rows("history", 5, 52), { id: "live-suffix", height: 64 });
+
+  const after = await metrics(page);
+  expect(after.firstVisible?.id).toBe(before.firstVisible?.id);
+  expect(Math.abs((after.firstVisible?.top ?? 0) - (before.firstVisible?.top ?? 0))).toBeLessThanOrEqual(1);
+  await expectSnapshot(page, (value) => value.mode === "free-scrolling" && value.newItemCount === 1);
+});
+
 function rows(prefix: string, count: number, height: number): FixtureItem[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `${prefix}-${index + 1}`,
@@ -237,6 +355,43 @@ async function append(page: Page, items: FixtureItem[]): Promise<void> {
   await page.evaluate(async (nextItems) => {
     await (window as FixtureWindow).messageScrollerFixture.append(nextItems);
   }, items);
+}
+
+async function reinsertFixture(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const element = document.querySelector<HTMLElement>("message-scroller-fixture");
+    if (!element) throw new Error("MessageScroller fixture is unavailable");
+    element.remove();
+    document.body.appendChild(element);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+}
+
+async function batchedPrependAndAppend(
+  page: Page,
+  prepended: FixtureItem[],
+  appended: FixtureItem
+): Promise<void> {
+  await page.evaluate(
+    async ({ prefix, suffix }) => {
+      const element = document.querySelector("message-scroller-fixture") as
+        | (HTMLElement & {
+            items: FixtureItem[];
+            updateComplete: Promise<unknown>;
+          })
+        | null;
+      if (!element) throw new Error("MessageScroller fixture is unavailable");
+
+      element.items = [...prefix.map((item) => ({ ...item })), ...element.items];
+      await element.updateComplete;
+      element.items = [...element.items, { ...suffix }];
+      await element.updateComplete;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      );
+    },
+    { prefix: prepended, suffix: appended }
+  );
 }
 
 async function metrics(page: Page, id?: string): Promise<ScrollerMetrics> {
