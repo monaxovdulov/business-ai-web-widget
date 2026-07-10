@@ -67,7 +67,54 @@ with `schema_version: "site_widget.v1"` and
 The browser renders AI text only when the response has
 `automation.status="replied"` and a persisted reply text. `fallback`,
 `disabled`, unknown statuses, and `replied` without text render a safe
-manager-review system bubble.
+manager-review marker.
+
+`site_widget.v1` is strict text-only JSON. Production never renders a photo
+picker and never adds attachments, filenames, MIME values, `blob:` URLs, or
+base64 to requests, events, or storage. The frontend does not know the AI
+qualification workflow, its fields, completion criteria, or number of turns;
+it only sends visitor text and renders the backend-confirmed sequence.
+
+## Mock photo previews
+
+Photo preview is a development-only aid and appears only when all three flags
+are enabled:
+
+```ts
+mountSiteWidget({
+  mock: true,
+  attachmentsEnabled: true,
+  showAttachmentSlot: true
+});
+```
+
+The mock accepts up to three JPEG, PNG, or WebP images (5 MiB each, 15 MiB
+total), validates signatures and decoded pixel count, and keeps object URLs
+only in tab memory. Text remains required. The preview can move into a mock
+visitor bubble, but the v1 request remains text-only. After a local build, see
+`examples/mock-photo-preview.html` through `npm run serve:local`.
+
+Production photos require a separate upload endpoint and `site_widget.v2` with
+opaque normalized `upload_id` references; browser metadata must remain
+untrusted.
+
+## Chat behavior and styling
+
+The transcript uses a keyed MessageScroller. It follows the live edge only
+while the visitor is already there, preserves the reading position, provides a
+“К новым сообщениям” action, and keeps a 40px reading line for new visitor
+turns. A failed request stays on one visitor bubble with one inline retry and
+the same idempotency key.
+
+The original CSS variables and `::part` names remain supported. Additive
+variables are `--sw-panel-normal-width` (520px) and
+`--sw-panel-wide-width` (640px). Additive parts include:
+
+```text
+message-root message-bubble message-meta message-status message-actions
+marker marker-icon marker-text message-viewport jump-latest
+attachment-list attachment attachment-preview attachment-remove
+```
 
 ## Events
 
@@ -89,6 +136,9 @@ npm install
 npm run check
 npm test
 npm run build
+npm run test:browser
+# or the complete gate:
+npm run test:all
 ```
 
 Build outputs:
