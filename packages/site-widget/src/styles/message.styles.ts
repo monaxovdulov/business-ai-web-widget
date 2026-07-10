@@ -49,6 +49,31 @@ export const messageStyles = css`
     word-break: normal;
   }
 
+  .message-attachments {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    list-style: none;
+    margin: 10px 0 0;
+    max-width: 240px;
+    padding: 0;
+  }
+
+  .message-attachment {
+    border-radius: 9px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .message-attachment__preview {
+    aspect-ratio: 1;
+    background: var(--sw-color-surface-system);
+    display: block;
+    height: auto;
+    object-fit: cover;
+    width: 100%;
+  }
+
   .message-meta,
   .message-disclosure,
   .message-status-row {

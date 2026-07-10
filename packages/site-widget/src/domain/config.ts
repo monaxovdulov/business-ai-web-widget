@@ -60,7 +60,7 @@ export const DEFAULT_WIDGET_CONFIG: SiteWidgetConfig = {
   errorMessage: "Не удалось отправить сообщение. Проверьте соединение и попробуйте еще раз.",
   retryLabel: "Повторить",
   sendLabel: "Отправить",
-  attachLabel: "Вложения будут доступны позже",
+  attachLabel: "Добавить фото",
   resizeLabel: "Изменить размер виджета",
   closeLabel: "Закрыть виджет",
   minimizeLabel: "Свернуть виджет",

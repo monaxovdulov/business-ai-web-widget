@@ -229,4 +229,488 @@ describe("granit-site-widget Lit component", () => {
     expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(0);
     expect(widget.shadowRoot?.textContent).not.toContain("Старое сообщение");
   });
+
+  it("keeps production site_widget.v1 completely free of photo controls", async () => {
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      attachmentsEnabled: true,
+      showAttachmentSlot: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "production-text-only"
+    });
+    await widget.updateComplete;
+
+    expect(widget.shadowRoot?.querySelector(".attach-button")).toBeNull();
+    expect(widget.shadowRoot?.querySelector('input[type="file"]')).toBeNull();
+    expect(widget.shadowRoot?.textContent).not.toContain("Вложения будут доступны позже");
+  });
+
+  it("accepts a valid mock photo preview but still requires message text", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "mock-photo-preview"
+      });
+      await widget.updateComplete;
+
+      const input = widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input');
+      expect(input?.accept).toBe("image/jpeg,image/png,image/webp");
+      expect(input?.multiple).toBe(true);
+      const file = validPngFile("browser-private-name.png");
+      selectFiles(input, [file]);
+
+      await vi.waitFor(() => {
+        expect(widget.shadowRoot?.querySelectorAll('[part~="attachment"]')).toHaveLength(1);
+      });
+
+      expect(input?.value).toBe("");
+      expect(widget.shadowRoot?.textContent).toContain("Фото 1");
+      expect(widget.shadowRoot?.textContent).not.toContain("browser-private-name.png");
+      expect(widget.shadowRoot?.querySelector<HTMLButtonElement>('.send-button')?.disabled).toBe(true);
+      widget.shadowRoot
+        ?.querySelector<HTMLTextAreaElement>('.textarea')
+        ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(widget.shadowRoot?.querySelector('.message-root--visitor')).toBeNull();
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("partially accepts an image batch and announces one validation error", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "partial-photo-batch"
+      });
+      await widget.updateComplete;
+
+      const input = widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input');
+      const invalid = new File(["<svg></svg>"], "spoofed.png", { type: "image/png" });
+      selectFiles(input, [invalid, validPngFile("accepted.png")]);
+
+      await vi.waitFor(() => {
+        expect(widget.shadowRoot?.querySelectorAll('[part~="attachment"]')).toHaveLength(1);
+        expect(widget.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+          "поддерживаются только JPEG, PNG и WebP"
+        );
+      });
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("revokes previews on remove, config switch, clear and disconnect", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-cleanup"
+      });
+      await widget.updateComplete;
+
+      let input = widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input');
+      const repeatedFile = validPngFile("repeat-selection.png");
+      selectFiles(input, [repeatedFile]);
+      const removeUrl = await waitForDraftPreviewUrl(widget);
+      widget.shadowRoot?.querySelector<HTMLButtonElement>('[part~="attachment-remove"]')?.click();
+      await vi.waitFor(() => expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(removeUrl));
+
+      input = widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input');
+      selectFiles(input, [repeatedFile]);
+      const switchUrl = await waitForDraftPreviewUrl(widget);
+      widget.removeAttribute("mock");
+      await widget.updateComplete;
+      expect(widget.shadowRoot?.querySelector('.attachment-input')).toBeNull();
+      expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(switchUrl);
+
+      widget.setAttribute("mock", "true");
+      await widget.updateComplete;
+      input = widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input');
+      selectFiles(input, [validPngFile("clear.png")]);
+      const clearUrl = await waitForDraftPreviewUrl(widget);
+      widget.clearSession();
+      expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(clearUrl);
+      await widget.updateComplete;
+
+      input = widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input');
+      selectFiles(input, [validPngFile("disconnect.png")]);
+      const disconnectUrl = await waitForDraftPreviewUrl(widget);
+      widget.remove();
+      expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(disconnectUrl);
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("moves mock photos into the visitor bubble without exposing metadata in events or storage", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-submit"
+      });
+      let submittedDetail: Record<string, unknown> | undefined;
+      widget.addEventListener("granit-site-widget:message-submitted", (event) => {
+        submittedDetail = (event as CustomEvent<Record<string, unknown>>).detail;
+      });
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [
+        validPngFile("secret-cemetery-reference.png")
+      ]);
+      await vi.waitFor(() => expect(widget.shadowRoot?.querySelector('[part~="attachment"]')).toBeTruthy());
+
+      const textarea = widget.shadowRoot?.querySelector<HTMLTextAreaElement>('.textarea');
+      if (textarea) {
+        textarea.value = "Похожий памятник";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await widget.updateComplete;
+      widget.shadowRoot?.querySelector<HTMLButtonElement>('.send-button')?.click();
+
+      await vi.waitFor(() => {
+        expect(widget.shadowRoot?.querySelector('.message-root--visitor .message-attachment__preview')).toBeTruthy();
+      });
+      const submittedPreviewUrl = widget.shadowRoot
+        ?.querySelector<HTMLImageElement>('.message-root--visitor .message-attachment__preview')
+        ?.getAttribute("src");
+
+      expect(widget.shadowRoot?.querySelector('.attachment-list')).toBeNull();
+      expect(JSON.stringify(submittedDetail)).not.toMatch(/secret-cemetery-reference|blob:|image\/png|attachments/i);
+      expectNoAttachmentRuntimeValues(submittedDetail);
+      expectStorageToContainOnlyWidgetState("photo-submit");
+
+      widget.clearSession();
+      expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(submittedPreviewUrl);
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("keeps the same mock preview and idempotency key across an inline retry", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-retry"
+      });
+      const requestMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValueOnce({
+          status: "replied",
+          replyText: "Фото осталось в сообщении",
+          raw: { mock: true }
+        });
+      (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [
+        validPngFile("retry-private-name.png")
+      ]);
+      const previewUrl = await waitForDraftPreviewUrl(widget);
+      const textarea = widget.shadowRoot?.querySelector<HTMLTextAreaElement>('.textarea');
+      if (textarea) {
+        textarea.value = "Проверить фото";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await widget.updateComplete;
+      widget.shadowRoot?.querySelector<HTMLButtonElement>('.send-button')?.click();
+
+      await vi.waitFor(() => expect(widget.shadowRoot?.querySelector('[part~="retry-button"]')).toBeTruthy());
+      expect(
+        widget.shadowRoot
+          ?.querySelector<HTMLImageElement>('.message-root--visitor .message-attachment__preview')
+          ?.getAttribute("src")
+      ).toBe(previewUrl);
+
+      widget.shadowRoot?.querySelector<HTMLButtonElement>('[part~="retry-button"]')?.click();
+      await vi.waitFor(() => expect(widget.shadowRoot?.textContent).toContain("Фото осталось в сообщении"));
+
+      expect(requestMock).toHaveBeenCalledTimes(2);
+      const firstRequest = requestMock.mock.calls[0]?.[1] as Record<string, unknown>;
+      const secondRequest = requestMock.mock.calls[1]?.[1] as Record<string, unknown>;
+      expect(firstRequest.idempotency_key).toBe(secondRequest.idempotency_key);
+      expect(JSON.stringify(firstRequest)).not.toMatch(/attachments|retry-private-name|blob:|image\/png/i);
+      expectNoAttachmentRuntimeValues(firstRequest);
+      expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(1);
+      expect(imageEnvironment.revokeObjectURL).not.toHaveBeenCalledWith(previewUrl);
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("does not resurrect a photo selection that was cleared while decoding", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    let finishDecode: (bitmap: ImageBitmap) => void = () => undefined;
+    imageEnvironment.createImageBitmap.mockImplementationOnce(
+      () =>
+        new Promise<ImageBitmap>((resolve) => {
+          finishDecode = resolve;
+        })
+    );
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-clear-during-decode"
+      });
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [
+        validPngFile("slow.png")
+      ]);
+      await vi.waitFor(() => expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(1));
+      widget.clearSession();
+      finishDecode({ width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap);
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await widget.updateComplete;
+      expect(widget.shadowRoot?.querySelector('[part~="attachment"]')).toBeNull();
+      expect(widget.shadowRoot?.querySelector('[role="alert"]')).toBeNull();
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("waits for an in-flight photo validation before programmatic submit", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    let finishDecode: (bitmap: ImageBitmap) => void = () => undefined;
+    imageEnvironment.createImageBitmap.mockImplementationOnce(
+      () =>
+        new Promise<ImageBitmap>((resolve) => {
+          finishDecode = resolve;
+        })
+    );
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-submit-during-decode"
+      });
+      const requestMock = vi.fn().mockResolvedValue({
+        status: "replied",
+        replyText: "Готово",
+        raw: { mock: true }
+      });
+      (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("slow.png")]);
+      await vi.waitFor(() => expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(1));
+      widget.sendMessage("Сообщение ждёт фото");
+      expect(requestMock).not.toHaveBeenCalled();
+
+      finishDecode({ width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap);
+      await vi.waitFor(() => {
+        expect(requestMock).toHaveBeenCalledTimes(1);
+        expect(widget.shadowRoot?.querySelector('.message-root--visitor .message-attachment__preview')).toBeTruthy();
+      });
+      expect(widget.shadowRoot?.querySelector('.attachment-list')).toBeNull();
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("starts a fresh selection queue after clear without waiting for an obsolete decoder", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    let finishOldDecode: (bitmap: ImageBitmap) => void = () => undefined;
+    imageEnvironment.createImageBitmap.mockImplementationOnce(
+      () =>
+        new Promise<ImageBitmap>((resolve) => {
+          finishOldDecode = resolve;
+        })
+    );
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-queue-epoch"
+      });
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("old.png")]);
+      await vi.waitFor(() => expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(1));
+      widget.clearSession();
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("new.png")]);
+      await waitForDraftPreviewUrl(widget);
+      expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(2);
+
+      finishOldDecode({ width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(widget.shadowRoot?.querySelectorAll('.attachment__preview')).toHaveLength(1);
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("revokes every in-flight batch URL immediately on clear", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    let finishSecondDecode: (bitmap: ImageBitmap) => void = () => undefined;
+    imageEnvironment.createImageBitmap
+      .mockResolvedValueOnce({ width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap)
+      .mockImplementationOnce(
+        () =>
+          new Promise<ImageBitmap>((resolve) => {
+            finishSecondDecode = resolve;
+          })
+      );
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-inflight-cleanup"
+      });
+      await widget.updateComplete;
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [
+        validPngFile("first.png"),
+        validPngFile("second.png")
+      ]);
+      await vi.waitFor(() => expect(imageEnvironment.createImageBitmap).toHaveBeenCalledTimes(2));
+      const createdBeforeClear = imageEnvironment.createObjectURL.mock.results
+        .map((result) => result.value)
+        .filter((value): value is string => typeof value === "string");
+      expect(createdBeforeClear.length).toBeGreaterThan(0);
+
+      widget.clearSession();
+      for (const previewUrl of createdBeforeClear) {
+        expect(imageEnvironment.revokeObjectURL).toHaveBeenCalledWith(previewUrl);
+      }
+
+      finishSecondDecode({ width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(widget.shadowRoot?.querySelector('[part~="attachment"]')).toBeNull();
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
 });
+
+function validPngFile(name: string): File {
+  return new File([Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], name, {
+    type: "image/png"
+  });
+}
+
+function selectFiles(input: HTMLInputElement | null | undefined, files: readonly File[]): void {
+  if (!input) throw new Error("Attachment input was not rendered");
+  Object.defineProperty(input, "files", { configurable: true, value: files });
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function waitForDraftPreviewUrl(widget: HTMLElement): Promise<string> {
+  let previewUrl = "";
+  await vi.waitFor(() => {
+    previewUrl = widget.shadowRoot?.querySelector<HTMLImageElement>('.attachment__preview')?.getAttribute("src") ?? "";
+    expect(previewUrl).toMatch(/^blob:mock-/);
+  });
+  return previewUrl;
+}
+
+function installImageTestEnvironment(): {
+  createImageBitmap: ReturnType<typeof vi.fn>;
+  createObjectURL: ReturnType<typeof vi.fn>;
+  revokeObjectURL: ReturnType<typeof vi.fn>;
+  restore(): void;
+} {
+  const createImageBitmapDescriptor = Object.getOwnPropertyDescriptor(globalThis, "createImageBitmap");
+  const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+  const revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+  let objectUrlIndex = 0;
+  const createObjectURL = vi.fn(() => `blob:mock-${++objectUrlIndex}`);
+  const revokeObjectURL = vi.fn();
+  const createImageBitmapMock = vi.fn(async () => {
+    return { width: 1200, height: 800, close: vi.fn() } as unknown as ImageBitmap;
+  });
+
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    configurable: true,
+    value: createImageBitmapMock,
+    writable: true
+  });
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL, writable: true });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL, writable: true });
+
+  return {
+    createImageBitmap: createImageBitmapMock,
+    createObjectURL,
+    revokeObjectURL,
+    restore() {
+      restoreProperty(globalThis, "createImageBitmap", createImageBitmapDescriptor);
+      restoreProperty(URL, "createObjectURL", createObjectURLDescriptor);
+      restoreProperty(URL, "revokeObjectURL", revokeObjectURLDescriptor);
+    }
+  };
+}
+
+function expectNoAttachmentRuntimeValues(value: unknown, seen = new Set<unknown>()): void {
+  if (value == null || typeof value !== "object") return;
+  expect(value).not.toBeInstanceOf(File);
+  expect(value).not.toBeInstanceOf(Blob);
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  const forbiddenKeys = new Set([
+    "attachment",
+    "attachments",
+    "file",
+    "files",
+    "filename",
+    "mimeType",
+    "previewUrl",
+    "sizeBytes"
+  ]);
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    expect(forbiddenKeys.has(key)).toBe(false);
+    expectNoAttachmentRuntimeValues(child, seen);
+  }
+}
+
+function expectStorageToContainOnlyWidgetState(widgetInstanceId: string): void {
+  const allowedKeys = new Set([
+    `sw:${widgetInstanceId}:public_session_id`,
+    `sw:${widgetInstanceId}:open_state`,
+    `sw:${widgetInstanceId}:panel_size`
+  ]);
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key) continue;
+    expect(allowedKeys.has(key)).toBe(true);
+    expect(localStorage.getItem(key)).not.toMatch(/blob:|data:image|base64|secret-cemetery-reference|\[object File\]/i);
+  }
+}
+
+function restoreProperty(target: object, key: PropertyKey, descriptor?: PropertyDescriptor): void {
+  if (descriptor) Object.defineProperty(target, key, descriptor);
+  else Reflect.deleteProperty(target, key);
+}

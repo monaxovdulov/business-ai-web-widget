@@ -229,6 +229,7 @@ export const widgetStyles = css`
   .contact-trigger,
   .phone-save,
   .retry-button,
+  .attachment__remove,
   .jump-latest,
   .mobile-action {
     -webkit-tap-highlight-color: transparent;
@@ -383,9 +384,13 @@ export const widgetStyles = css`
     border-radius: var(--sw-radius-input);
     display: grid;
     gap: 10px;
-    grid-template-columns: 40px minmax(0, 1fr) 46px;
+    grid-template-columns: minmax(0, 1fr) 46px;
     min-height: 58px;
     padding: 7px 8px 7px 12px;
+  }
+
+  .composer[data-attachments="true"] {
+    grid-template-columns: 44px minmax(0, 1fr) 46px;
   }
 
   .attach-button {
@@ -393,13 +398,83 @@ export const widgetStyles = css`
     border: 0;
     color: var(--sw-color-accent);
     cursor: pointer;
-    height: 40px;
-    width: 40px;
+    height: 44px;
+    width: 44px;
   }
 
   .attach-button:disabled {
     cursor: not-allowed;
     opacity: 0.48;
+  }
+
+  .attachment-validation {
+    color: var(--sw-color-error);
+    font-size: var(--sw-font-size-small);
+    line-height: var(--sw-line-height-small);
+    margin: 0 0 8px;
+  }
+
+  .attachment-list {
+    display: flex;
+    gap: 8px;
+    list-style: none;
+    margin: 0 0 10px;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 0 0 2px;
+  }
+
+  .attachment {
+    align-items: center;
+    background: var(--sw-color-surface-control);
+    border: 1px solid var(--sw-color-border-soft);
+    border-radius: 12px;
+    display: grid;
+    flex: 0 0 auto;
+    gap: 8px;
+    grid-template-columns: 48px minmax(54px, 1fr) 44px;
+    min-width: 162px;
+    overflow: hidden;
+    padding: 5px 5px 5px 6px;
+  }
+
+  .attachment__preview {
+    background: var(--sw-color-surface-system);
+    border-radius: 8px;
+    display: block;
+    height: 48px;
+    object-fit: cover;
+    width: 48px;
+  }
+
+  .attachment__details {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .attachment__label {
+    font-size: var(--sw-font-size-small);
+    font-weight: var(--sw-font-weight-action);
+  }
+
+  .attachment__size {
+    color: var(--sw-color-text-secondary);
+    font-size: 12px;
+  }
+
+  .attachment__remove {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    color: var(--sw-color-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    height: 44px;
+    justify-content: center;
+    padding: 0;
+    width: 44px;
   }
 
   .textarea {
@@ -538,6 +613,7 @@ export const widgetStyles = css`
   .phone-field:focus-visible,
   .phone-save:focus-visible,
   .retry-button:focus-visible,
+  .attachment__remove:focus-visible,
   .jump-latest:focus-visible {
     outline: 3px solid color-mix(in srgb, var(--sw-color-accent) 35%, transparent);
     outline-offset: 3px;

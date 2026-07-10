@@ -29,8 +29,8 @@ export function buildWidgetViewModel(state: WidgetState, config: SiteWidgetConfi
     showMobileActions: !state.open && config.showMobileActions && config.mobileActions.length > 0,
     showContactTrigger: !config.collectPhoneAfterFirstMessage || hasVisitorMessage,
     contactLabel: state.contactPhone ? config.phoneSavedLabel : config.phoneCaptureLabel,
-    attachmentVisible: config.showAttachmentSlot,
-    attachmentDisabled: !config.attachmentsEnabled,
+    attachmentVisible: config.mock && config.attachmentsEnabled && config.showAttachmentSlot,
+    attachmentDisabled: false,
     status: state.status
   };
 }

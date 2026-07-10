@@ -1,5 +1,6 @@
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { repeat } from "lit/directives/repeat.js";
+import { ImageAttachmentController } from "../controllers/image-attachment-controller";
 import { MessageScrollerController } from "../controllers/message-scroller-controller";
 import { normalizeWidgetConfig, OBSERVED_CONFIG_ATTRIBUTES, readConfigFromElement } from "../domain/config";
 import { createIdempotencyKey } from "../domain/ids";
@@ -20,6 +21,7 @@ import { messageStyles } from "../styles/message.styles";
 import { widgetStyles } from "../styles/widget.styles";
 import type { SiteWidgetAction, SiteWidgetConfig, SiteWidgetContact, SiteWidgetPanelSize } from "../types/public";
 import { widgetIcon } from "../ui/icons";
+import { renderAttachmentPicker, renderAttachmentPreviewList } from "./widget-attachments";
 import { renderChatItem } from "./widget-message";
 
 export const SITE_WIDGET_TAG_NAME = "granit-site-widget";
@@ -47,6 +49,8 @@ export class GranitSiteWidgetElement extends LitElement {
   private publicSessionId = "";
   private abortController: AbortController | undefined;
   private readonly messageScroller = new MessageScrollerController(this);
+  private readonly imageAttachments = new ImageAttachmentController(this);
+  private sendMessageRequest = sendSiteWidgetMessage;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -63,8 +67,12 @@ export class GranitSiteWidgetElement extends LitElement {
 
     const previousInstanceId = this.config.widgetInstanceId;
     const previousStorage = this.config.storage;
+    const previousPhotoPreviewEnabled = this.isPhotoPreviewEnabled();
     this.config = readConfigFromElement(this);
     this.syncHostAttributes();
+    const photoPreviewEnabled = this.isPhotoPreviewEnabled();
+    if (previousPhotoPreviewEnabled && !photoPreviewEnabled) this.imageAttachments.clearAll();
+    this.imageAttachments.setEnabled(photoPreviewEnabled);
 
     if (previousInstanceId !== this.config.widgetInstanceId || previousStorage !== this.config.storage) {
       this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
@@ -111,6 +119,7 @@ export class GranitSiteWidgetElement extends LitElement {
   clearSession(): void {
     this.abortController?.abort();
     this.abortController = undefined;
+    this.imageAttachments.clearAll();
     this.state = applyWidgetAction(this.state, { type: "session.cleared" }, this.config);
     this.sessionStore?.clearPublicSessionId();
     this.publicSessionId = this.sessionStore?.getPublicSessionId() ?? "";
@@ -123,6 +132,8 @@ export class GranitSiteWidgetElement extends LitElement {
     const panelSizeButtonLabel = this.getPanelSizeButtonLabel();
     const panelSizeIconName = effectivePanelSize === "fullscreen" ? "minimize-2" : "maximize-2";
     const scrollerSnapshot = this.messageScroller.getSnapshot();
+    const photoPreviewEnabled = this.isPhotoPreviewEnabled();
+    const attachmentProcessing = this.imageAttachments.isProcessing();
     const pendingMessage = view.pending
       ? view.messages.find((message) => message.id === view.pending?.messageId)
       : undefined;
@@ -232,7 +243,11 @@ export class GranitSiteWidgetElement extends LitElement {
                     data-message-id=${message.id}
                     data-scroll-anchor=${message.role === "visitor" ? "true" : nothing}
                   >
-                    ${renderChatItem(message, { config: this.config, onRetry: this.retryPending })}
+                    ${renderChatItem(message, {
+                      config: this.config,
+                      onRetry: this.retryPending,
+                      images: this.imageAttachments.getForMessage(message.id)
+                    })}
                   </div>`
                 )}
                 <div class="message-scroller__tail" aria-hidden="true"></div>
@@ -267,18 +282,27 @@ export class GranitSiteWidgetElement extends LitElement {
         </div>
 
         <div class="composer-shell" part="composer-shell">
-          <form class="composer" part="composer" @submit=${this.handleSubmit}>
-            <button
-              class="attach-button"
-              part="attach-button"
-              type="button"
-              title=${this.config.attachLabel}
-              aria-label=${this.config.attachLabel}
-              ?hidden=${!view.attachmentVisible}
-              ?disabled=${view.attachmentDisabled}
-            >
-              ${widgetIcon("paperclip")}
-            </button>
+          ${photoPreviewEnabled
+            ? renderAttachmentPreviewList({
+                attachments: this.imageAttachments.getDraft(),
+                validationMessage: this.imageAttachments.getValidationMessage(),
+                validationRevision: this.imageAttachments.getValidationRevision(),
+                onRemove: this.handleRemoveAttachment
+              })
+            : nothing}
+          <form
+            class="composer"
+            part="composer"
+            data-attachments=${String(photoPreviewEnabled)}
+            @submit=${this.handleSubmit}
+          >
+            ${photoPreviewEnabled
+              ? renderAttachmentPicker({
+                  label: this.config.attachLabel,
+                  disabled: attachmentProcessing || view.submitting || Boolean(view.pending),
+                  onFilesSelected: this.handleAttachmentFiles
+                })
+              : nothing}
             <label class="visually-hidden" for="granit-site-widget-message">${this.config.placeholder}</label>
             <textarea
               id="granit-site-widget-message"
@@ -298,7 +322,7 @@ export class GranitSiteWidgetElement extends LitElement {
               part="send-button"
               type="submit"
               aria-label=${this.config.sendLabel}
-              ?disabled=${!view.canSend}
+              ?disabled=${!view.canSend || attachmentProcessing}
             >
               ${widgetIcon("send")}
             </button>
@@ -364,6 +388,7 @@ export class GranitSiteWidgetElement extends LitElement {
     this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
     this.publicSessionId = this.sessionStore.getPublicSessionId();
     this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
+    this.imageAttachments.setEnabled(this.isPhotoPreviewEnabled());
 
     const persistedOpen = this.config.persistOpenState ? this.sessionStore.getOpenState() : undefined;
     const initialOpen = this.hasAttribute("open") || (persistedOpen ?? this.config.initialState === "open");
@@ -527,13 +552,20 @@ export class GranitSiteWidgetElement extends LitElement {
   };
 
   private async submitDraft(): Promise<void> {
-    const text = this.state.draft.trim();
+    let text = this.state.draft.trim();
     if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
+
+    if (this.isPhotoPreviewEnabled() && this.imageAttachments.isProcessing()) {
+      await this.imageAttachments.whenIdle();
+      text = this.state.draft.trim();
+      if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
+    }
 
     const idempotencyKey = createIdempotencyKey(this.publicSessionId);
     this.state = applyWidgetAction(this.state, { type: "submit.started", text, idempotencyKey }, this.config);
     const pending = this.state.pending;
     if (!pending || pending.idempotencyKey !== idempotencyKey) return;
+    if (this.isPhotoPreviewEnabled()) this.imageAttachments.transferDraftToMessage(pending.messageId);
     this.requestUpdate();
     await this.sendPending(pending);
   }
@@ -574,7 +606,7 @@ export class GranitSiteWidgetElement extends LitElement {
       });
       if (!isCurrentRequest()) return;
 
-      const response = await sendSiteWidgetMessage(this.config, request, requestController.signal);
+      const response = await this.sendMessageRequest(this.config, request, requestController.signal);
       if (!isCurrentRequest()) return;
 
       if (response.publicSessionId) {
@@ -623,6 +655,27 @@ export class GranitSiteWidgetElement extends LitElement {
     const phone = this.state.contactPhone.trim();
     return phone ? { phone, preferred_contact: "phone" } : undefined;
   }
+
+  private isPhotoPreviewEnabled(): boolean {
+    return this.config.mock && this.config.attachmentsEnabled && this.config.showAttachmentSlot;
+  }
+
+  private handleAttachmentFiles = async (files: readonly File[]): Promise<void> => {
+    if (!this.isPhotoPreviewEnabled()) return;
+    await this.imageAttachments.selectFiles(files);
+  };
+
+  private handleRemoveAttachment = (attachmentId: string): void => {
+    const focusTarget = this.imageAttachments.removeDraft(attachmentId);
+    void this.updateComplete.then(() => {
+      const target = focusTarget
+        ? [...this.renderRoot.querySelectorAll<HTMLButtonElement>("[data-attachment-id]")].find(
+            (button) => button.dataset.attachmentId === focusTarget
+          )
+        : this.renderRoot.querySelector<HTMLButtonElement>(".attach-button");
+      target?.focus();
+    });
+  };
 
   private autoGrowTextarea(): void {
     const textarea = this.renderRoot.querySelector<HTMLTextAreaElement>(".textarea");

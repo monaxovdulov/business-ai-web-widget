@@ -1,10 +1,12 @@
 import { html, nothing, type TemplateResult } from "lit";
 import type { SiteWidgetConfig, WidgetMessage } from "../types/public";
 import { widgetIcon } from "../ui/icons";
+import { renderMessageAttachments, type WidgetAttachmentView } from "./widget-attachments";
 
 export type WidgetMessageRenderContext = {
   config: SiteWidgetConfig;
   onRetry: (messageId: string) => void;
+  images?: readonly WidgetAttachmentView[];
 };
 
 export function renderChatItem(message: WidgetMessage, context: WidgetMessageRenderContext): TemplateResult {
@@ -17,13 +19,14 @@ export function renderMessageRoot(message: WidgetMessage, context: WidgetMessage
     part="message-root"
     data-message-id=${message.id}
   >
-    ${renderMessageBubble(message)} ${renderMessageMeta(message, context)}
+    ${renderMessageBubble(message, context)} ${renderMessageMeta(message, context)}
   </div>`;
 }
 
-export function renderMessageBubble(message: WidgetMessage): TemplateResult {
+export function renderMessageBubble(message: WidgetMessage, context: WidgetMessageRenderContext): TemplateResult {
   return html`<article class=${messageClass(message)} part=${`message message-${message.role} message-bubble`}>
     <p class="message__text">${message.text}</p>
+    ${renderMessageAttachments(context.images ?? [])}
   </article>`;
 }
 
