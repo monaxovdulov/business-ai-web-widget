@@ -1,4 +1,4 @@
-import type { SiteWidgetConfig, WidgetMessage, WidgetMessageStatus } from "../types/public";
+import type { SiteWidgetConfig, WidgetMessage, WidgetMessageStatus, WidgetSystemKind } from "../types/public";
 import { createClientId } from "./ids";
 
 export type WidgetStatus =
@@ -42,7 +42,8 @@ export type WidgetAction =
   | { type: "visitor.persisted"; text: string }
   | { type: "assistant.replied"; text: string }
   | { type: "system.message"; text: string; status: "fallback" | "disabled" }
-  | { type: "submit.failed"; text: string };
+  | { type: "submit.failed"; text: string }
+  | { type: "session.cleared" };
 
 export function createWidgetState({
   config,
@@ -111,7 +112,7 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
       };
 
     case "submit.started": {
-      if (current.submitting) return current;
+      if (current.submitting || current.pending) return current;
       const text = String(action.text ?? "").trim();
       const idempotencyKey = String(action.idempotencyKey ?? "").trim();
       if (!text || !idempotencyKey) return current;
@@ -129,33 +130,33 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
           idempotencyKey
         },
         visitorMessageCount: current.visitorMessageCount + 1,
-        messages: [...clearErrorStatuses(current.messages), message]
+        messages: [...current.messages, message]
       };
     }
 
     case "retry.started": {
-      if (!current.pending) return current;
+      if (!current.pending || current.submitting) return current;
       return {
         ...current,
         status: "submitted_waiting",
         submitting: true,
-        messages: current.messages
-          .filter((message) => !(message.role === "system" && message.status === "error"))
-          .map((message) =>
-            message.id === current.pending?.messageId ? { ...message, status: "pending" as const } : message
-          )
+        messages: current.messages.map((message) =>
+          message.id === current.pending?.messageId ? { ...message, status: "pending" as const } : message
+        )
       };
     }
 
-    case "visitor.persisted":
+    case "visitor.persisted": {
+      if (!current.pending) return current;
       return {
         ...current,
         messages: current.messages.map((message) =>
-          message.id === current.pending?.messageId || (message.role === "visitor" && message.text === action.text)
+          message.id === current.pending?.messageId
             ? { ...message, status: "sent" as const }
             : message
         )
       };
+    }
 
     case "assistant.replied": {
       const text = String(action.text ?? "").trim();
@@ -167,12 +168,13 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
 
     case "system.message": {
       const text = String(action.text ?? "").trim();
-      const messages = text ? [...current.messages, createWidgetMessage({ role: "system", text })] : current.messages;
+      const messages = text
+        ? [...current.messages, createWidgetMessage({ role: "system", text, systemKind: action.status })]
+        : current.messages;
       return finishSubmit(current, messages, action.status);
     }
 
     case "submit.failed": {
-      const text = String(action.text ?? "").trim();
       const messages = current.messages.map((message) =>
         message.id === current.pending?.messageId ? { ...message, status: "error" as const } : message
       );
@@ -180,9 +182,12 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
         ...current,
         status: "error",
         submitting: false,
-        messages: text ? [...messages, createWidgetMessage({ role: "system", text, status: "error" })] : messages
+        messages
       };
     }
+
+    case "session.cleared":
+      return config ? createWidgetState({ config, open: current.open }) : { ...current, pending: undefined, submitting: false };
 
     default:
       return current;
@@ -201,12 +206,14 @@ export function createWidgetMessage({
   text,
   status = "sent",
   disclosure = false,
+  systemKind,
   createdAt = new Date().toISOString()
 }: {
   role: WidgetMessage["role"];
   text: string;
   status?: WidgetMessageStatus;
   disclosure?: boolean;
+  systemKind?: WidgetSystemKind;
   createdAt?: string;
 }): WidgetMessage {
   return {
@@ -215,6 +222,7 @@ export function createWidgetMessage({
     text: String(text ?? ""),
     status,
     disclosure,
+    systemKind,
     createdAt
   };
 }
@@ -248,11 +256,4 @@ function normalizeState(state: WidgetState): WidgetState {
     visitorMessageCount: Number.isInteger(state.visitorMessageCount) ? state.visitorMessageCount : 0,
     unreadCount: Number.isInteger(state.unreadCount) ? state.unreadCount : 0
   };
-}
-
-function clearErrorStatuses(messages: WidgetMessage[]): WidgetMessage[] {
-  return messages.map((message) => ({
-    ...message,
-    status: message.status === "error" ? "sent" : message.status
-  }));
 }

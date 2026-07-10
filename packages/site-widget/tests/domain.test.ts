@@ -4,6 +4,7 @@ import { createIdempotencyKey } from "../src/domain/ids";
 import { buildSiteWidgetMessageRequest } from "../src/domain/request";
 import { mapSiteWidgetResponse } from "../src/domain/response";
 import { applyWidgetAction, createWidgetState } from "../src/domain/state";
+import { buildWidgetViewModel } from "../src/domain/view-model";
 import { emitSiteWidgetEvent } from "../src/events/widget-events";
 import { createSessionStore } from "../src/services/session-store";
 
@@ -83,13 +84,119 @@ describe("site widget domain", () => {
     state = applyWidgetAction(state, { type: "submit.started", text: "Нужен расчет", idempotencyKey: idem }, config);
     state = applyWidgetAction(state, { type: "submit.failed", text: config.errorMessage }, config);
 
-    expect(state.pending?.idempotencyKey).toBe(idem);
-    expect(state.messages.some((message) => message.status === "error")).toBe(true);
+    const failedMessageId = state.pending?.messageId;
+    expect(state.pending).toMatchObject({
+      messageId: failedMessageId,
+      text: "Нужен расчет",
+      idempotencyKey: idem
+    });
+    expect(state.messages.filter((message) => message.status === "error")).toHaveLength(1);
+    expect(state.messages.find((message) => message.id === failedMessageId)?.role).toBe("visitor");
 
     state = applyWidgetAction(state, { type: "retry.started" }, config);
 
     expect(state.pending?.idempotencyKey).toBe(idem);
-    expect(state.messages.some((message) => message.role === "system" && message.status === "error")).toBe(false);
+    expect(state.pending?.messageId).toBe(failedMessageId);
+    expect(state.messages.find((message) => message.id === failedMessageId)?.status).toBe("pending");
+  });
+
+  it("keeps one failed visitor message and blocks a parallel submit until retry or clear", () => {
+    const config = normalizeWidgetConfig();
+    let state = createWidgetState({ config, open: true });
+    const initialLength = state.messages.length;
+
+    state = applyWidgetAction(
+      state,
+      { type: "submit.started", text: "Первое сообщение", idempotencyKey: "idem_first" },
+      config
+    );
+    const failedMessageId = state.pending?.messageId;
+    state = applyWidgetAction(state, { type: "submit.failed", text: config.errorMessage }, config);
+    state = applyWidgetAction(state, { type: "submit.failed", text: config.errorMessage }, config);
+
+    expect(state.messages).toHaveLength(initialLength + 1);
+    expect(state.messages.filter((message) => message.status === "error")).toHaveLength(1);
+    expect(buildWidgetViewModel(state, config).canSend).toBe(false);
+
+    const blocked = applyWidgetAction(
+      state,
+      { type: "submit.started", text: "Второе сообщение", idempotencyKey: "idem_second" },
+      config
+    );
+    expect(blocked.pending?.messageId).toBe(failedMessageId);
+    expect(blocked.messages).toHaveLength(initialLength + 1);
+  });
+
+  it("marks only the current pending visitor as persisted", () => {
+    const config = normalizeWidgetConfig();
+    let state = createWidgetState({ config, open: true });
+
+    state = applyWidgetAction(
+      state,
+      { type: "submit.started", text: "Одинаковый текст", idempotencyKey: "idem_current" },
+      config
+    );
+    const currentId = state.pending?.messageId;
+    state = {
+      ...state,
+      messages: [
+        ...state.messages,
+        {
+          id: "msg_older_duplicate",
+          role: "visitor",
+          text: "Одинаковый текст",
+          createdAt: "2026-07-10T00:00:00.000Z",
+          status: "error"
+        }
+      ]
+    };
+
+    state = applyWidgetAction(state, { type: "visitor.persisted", text: "Одинаковый текст" }, config);
+
+    expect(state.messages.find((message) => message.id === currentId)?.status).toBe("sent");
+    expect(state.messages.find((message) => message.id === "msg_older_duplicate")?.status).toBe("error");
+  });
+
+  it("stores fallback and disabled marker kinds on their own messages", () => {
+    const config = normalizeWidgetConfig();
+    let fallback = createWidgetState({ config, open: true });
+    fallback = applyWidgetAction(
+      fallback,
+      { type: "system.message", text: config.fallbackMessage, status: "fallback" },
+      config
+    );
+
+    let disabled = createWidgetState({ config, open: true });
+    disabled = applyWidgetAction(
+      disabled,
+      { type: "system.message", text: config.disabledMessage, status: "disabled" },
+      config
+    );
+
+    expect(fallback.messages[fallback.messages.length - 1]?.systemKind).toBe("fallback");
+    expect(disabled.messages[disabled.messages.length - 1]?.systemKind).toBe("disabled");
+  });
+
+  it("keeps site_widget.v1 request strictly text-only", () => {
+    const config = normalizeWidgetConfig({ mock: true, attachmentsEnabled: true, showAttachmentSlot: true });
+    const request = buildSiteWidgetMessageRequest({
+      config,
+      text: "Фото остаётся только в UI",
+      idempotencyKey: "idem_text_only",
+      environment: {
+        href: "https://example.com/",
+        search: "",
+        title: "Landing",
+        referrer: "",
+        locale: "ru-RU",
+        timezone: "Europe/Moscow",
+        now: "2026-07-10T00:00:00.000Z"
+      }
+    });
+    const serialized = JSON.stringify(request);
+
+    expect(request.message).toEqual({ role: "visitor", text: "Фото остаётся только в UI" });
+    expect(serialized).not.toMatch(/attachments|filename|base64|blob:|image\//i);
   });
 
   it("dispatches primary and compatibility events with redacted payloads", () => {
@@ -113,6 +220,13 @@ describe("site widget domain", () => {
     expect(seen[0]?.detail.messageLength).toBe("Полный текст".length);
     expect(seen[0]?.detail.publicSessionId).toBeUndefined();
     expect(seen[0]?.detail.publicSessionIdHash).toMatch(/^h/);
+  });
+
+  it("keeps generated idempotency keys opaque from the public session id", () => {
+    const key = createIdempotencyKey("sws_private_session");
+
+    expect(key).toMatch(/^site-widget:/);
+    expect(key).not.toContain("sws_private_session");
   });
 
   it("uses v1 storage keys and supports separate widget instances", () => {

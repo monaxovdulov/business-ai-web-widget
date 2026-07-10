@@ -18,7 +18,7 @@ export function buildWidgetViewModel(state: WidgetState, config: SiteWidgetConfi
 
   return {
     ...state,
-    canSend: !state.submitting && !draftError,
+    canSend: !state.submitting && !state.pending && !draftError,
     draftError,
     showQuickReplies:
       state.open &&

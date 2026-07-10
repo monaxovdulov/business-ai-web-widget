@@ -100,8 +100,11 @@ export class GranitSiteWidgetElement extends LitElement {
   }
 
   clearSession(): void {
+    this.abortController?.abort();
+    this.state = applyWidgetAction(this.state, { type: "session.cleared" }, this.config);
     this.sessionStore?.clearPublicSessionId();
     this.publicSessionId = this.sessionStore?.getPublicSessionId() ?? "";
+    this.requestUpdate();
   }
 
   protected override render(): TemplateResult {
@@ -467,7 +470,7 @@ export class GranitSiteWidgetElement extends LitElement {
 
   private async submitDraft(): Promise<void> {
     const text = this.state.draft.trim();
-    if (validateDraft(text, this.config) || this.state.submitting) return;
+    if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
 
     const idempotencyKey = createIdempotencyKey(this.publicSessionId);
     this.state = applyWidgetAction(this.state, { type: "submit.started", text, idempotencyKey }, this.config);
@@ -476,7 +479,7 @@ export class GranitSiteWidgetElement extends LitElement {
   }
 
   private retryPending = async (): Promise<void> => {
-    if (!this.state.pending) return;
+    if (!this.state.pending || this.state.submitting) return;
     const { text, idempotencyKey } = this.state.pending;
     this.state = applyWidgetAction(this.state, { type: "retry.started" }, this.config);
     this.requestUpdate();
