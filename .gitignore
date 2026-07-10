@@ -1,3 +1,5 @@
 output/
 ref.png
 .codex/
+packages/site-widget/playwright-report/
+packages/site-widget/test-results/

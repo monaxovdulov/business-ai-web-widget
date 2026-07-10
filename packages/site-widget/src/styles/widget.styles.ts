@@ -229,6 +229,7 @@ export const widgetStyles = css`
   .contact-trigger,
   .phone-save,
   .retry-button,
+  .jump-latest,
   .mobile-action {
     -webkit-tap-highlight-color: transparent;
   }
@@ -289,15 +290,62 @@ export const widgetStyles = css`
     padding: 24px 26px 18px;
   }
 
-  .messages {
+  .message-scroller {
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 14px;
     min-height: 220px;
+    position: relative;
+  }
+
+  .message-viewport {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+    outline: 0;
+    overflow-anchor: none;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding-right: 4px;
-    scroll-behavior: smooth;
+  }
+
+  .messages {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 100%;
+  }
+
+  .message-scroller__item {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .message-scroller__tail {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+
+  .jump-latest {
+    align-items: center;
+    background: var(--sw-color-surface-control);
+    border: 1px solid var(--sw-color-border-soft);
+    border-radius: var(--sw-radius-button);
+    bottom: 8px;
+    box-shadow: 0 8px 24px rgba(35, 29, 22, 0.12);
+    color: var(--sw-color-text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: var(--sw-font-size-small);
+    font-weight: var(--sw-font-weight-action);
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 16px;
+    position: absolute;
+    right: 12px;
+    z-index: 1;
   }
 
   .quick-replies {
@@ -489,9 +537,16 @@ export const widgetStyles = css`
   .contact-trigger:focus-visible,
   .phone-field:focus-visible,
   .phone-save:focus-visible,
-  .retry-button:focus-visible {
+  .retry-button:focus-visible,
+  .jump-latest:focus-visible {
     outline: 3px solid color-mix(in srgb, var(--sw-color-accent) 35%, transparent);
     outline-offset: 3px;
+  }
+
+  .message-viewport:focus-visible {
+    border-radius: 10px;
+    outline: 3px solid color-mix(in srgb, var(--sw-color-accent) 35%, transparent);
+    outline-offset: 2px;
   }
 
   @media (max-width: 767px) {

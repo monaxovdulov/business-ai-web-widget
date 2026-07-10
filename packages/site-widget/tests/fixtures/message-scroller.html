@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MessageScroller fixture</title>
+    <style>
+      html {
+        color-scheme: light;
+        font-family: Arial, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+
+      message-scroller-fixture {
+        --fixture-viewport-height: 260px;
+
+        display: block;
+        width: 420px;
+      }
+
+      .scroller {
+        position: relative;
+      }
+
+      .viewport {
+        border: 1px solid #777;
+        height: var(--fixture-viewport-height);
+        overflow-anchor: none;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+      }
+
+      .content {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 100%;
+        padding: 0 8px;
+      }
+
+      .item {
+        align-items: center;
+        background: #f2eee8;
+        border: 1px solid #d4cbc0;
+        border-radius: 8px;
+        display: flex;
+        flex: 0 0 auto;
+        padding: 0 12px;
+      }
+
+      .item[data-scroll-anchor="true"] {
+        background: #e9ddd0;
+        border-color: #9a7553;
+      }
+
+      .tail-spacer {
+        flex: 0 0 auto;
+        min-height: 0;
+      }
+
+      .jump-latest {
+        bottom: 12px;
+        min-height: 44px;
+        position: absolute;
+        right: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <message-scroller-fixture></message-scroller-fixture>
+
+    <script type="module">
+      import { LitElement, html } from "lit";
+      import { ifDefined } from "lit/directives/if-defined.js";
+      import { repeat } from "lit/directives/repeat.js";
+      import { MessageScrollerController } from "/src/controllers/message-scroller-controller.ts";
+
+      const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
+      class MessageScrollerFixtureElement extends LitElement {
+        static properties = {
+          items: { state: true }
+        };
+
+        constructor() {
+          super();
+          this.items = [];
+          this.scrollCalls = [];
+          this.controller = new MessageScrollerController(this);
+          this.patchedViewport = undefined;
+        }
+
+        createRenderRoot() {
+          return this;
+        }
+
+        render() {
+          const snapshot = this.controller.getSnapshot();
+          const showLatest = snapshot.canScrollEnd || snapshot.newItemCount > 0;
+
+          return html`
+            <div class="scroller" data-testid="scroller">
+              <div
+                id="message-viewport"
+                class="viewport"
+                data-testid="viewport"
+                role="region"
+                aria-label="Сообщения"
+                tabindex="0"
+              >
+                <div class="content" data-testid="content" role="log" aria-relevant="additions">
+                  ${repeat(
+                    this.items,
+                    (item) => item.id,
+                    (item) => html`
+                      <div
+                        class="item"
+                        data-message-id=${item.id}
+                        data-scroll-anchor=${ifDefined(item.scrollAnchor ? "true" : undefined)}
+                        style=${`height: ${item.height}px`}
+                      >
+                        ${item.id}
+                      </div>
+                    `
+                  )}
+                  <div class="tail-spacer" data-testid="tail-spacer" aria-hidden="true"></div>
+                </div>
+              </div>
+              <button
+                id="jump-latest"
+                class="jump-latest"
+                data-testid="jump-latest"
+                type="button"
+                ?hidden=${!showLatest}
+                @click=${() => this.controller.scrollToEnd({ behavior: "smooth" })}
+              >
+                ${snapshot.newItemCount > 0 ? "Новые сообщения" : "К новым сообщениям"}
+              </button>
+            </div>
+          `;
+        }
+
+        updated() {
+          const root = this.querySelector(".scroller");
+          const viewport = this.querySelector(".viewport");
+          const content = this.querySelector(".content");
+          const tailSpacer = this.querySelector(".tail-spacer");
+          if (!root || !viewport || !content || !tailSpacer) return;
+
+          this.controller.connect({ root, viewport, content, tailSpacer });
+          this.patchScrollTo(viewport);
+          this.controller.reconcile(
+            this.items.map((item) => ({ id: item.id, scrollAnchor: Boolean(item.scrollAnchor) }))
+          );
+        }
+
+        patchScrollTo(viewport) {
+          if (this.patchedViewport === viewport) return;
+          this.patchedViewport = viewport;
+          const nativeScrollTo = viewport.scrollTo.bind(viewport);
+          viewport.scrollTo = (...args) => {
+            const first = args[0];
+            this.scrollCalls.push(
+              typeof first === "object" && first !== null ? (first.behavior ?? "auto") : "auto"
+            );
+            return nativeScrollTo(...args);
+          };
+        }
+
+        async settle() {
+          await this.updateComplete;
+          await nextFrame();
+          await nextFrame();
+          await nextFrame();
+        }
+      }
+
+      customElements.define("message-scroller-fixture", MessageScrollerFixtureElement);
+
+      const element = document.querySelector("message-scroller-fixture");
+
+      window.messageScrollerFixture = {
+        async reset(items, viewportHeight = 260) {
+          element.style.display = "block";
+          element.style.setProperty("--fixture-viewport-height", `${viewportHeight}px`);
+          element.items = items.map((item) => ({ ...item }));
+          await element.settle();
+        },
+
+        async append(items) {
+          element.items = [...element.items, ...items.map((item) => ({ ...item }))];
+          await element.settle();
+        },
+
+        async prepend(items) {
+          element.items = [...items.map((item) => ({ ...item })), ...element.items];
+          await element.settle();
+        },
+
+        async setItemHeight(id, height) {
+          element.items = element.items.map((item) => (item.id === id ? { ...item, height } : item));
+          await element.settle();
+        },
+
+        async setViewportHeight(height) {
+          element.style.setProperty("--fixture-viewport-height", `${height}px`);
+          await element.settle();
+        },
+
+        async setVisible(visible) {
+          element.style.display = visible ? "block" : "none";
+          element.controller.reconcile(
+            element.items.map((item) => ({ id: item.id, scrollAnchor: Boolean(item.scrollAnchor) }))
+          );
+          await element.settle();
+        },
+
+        async scrollToEnd(options = {}) {
+          const result = element.controller.scrollToEnd(options);
+          await element.settle();
+          return result;
+        },
+
+        async scrollToMessage(id, options = {}) {
+          const result = element.controller.scrollToMessage(id, options);
+          await element.settle();
+          return result;
+        },
+
+        clearScrollCalls() {
+          element.scrollCalls = [];
+        },
+
+        getScrollCalls() {
+          return [...element.scrollCalls];
+        },
+
+        getSnapshot() {
+          return { ...element.controller.getSnapshot() };
+        },
+
+        getMetrics(id) {
+          const viewport = element.querySelector(".viewport");
+          const tail = element.querySelector(".tail-spacer");
+          const item = id ? element.querySelector(`[data-message-id="${CSS.escape(id)}"]`) : null;
+          const viewportRect = viewport.getBoundingClientRect();
+          const viewportContentTop = viewportRect.top + viewport.clientTop;
+          const itemRect = item?.getBoundingClientRect();
+          const visibleItems = [...element.querySelectorAll("[data-message-id]")]
+            .map((candidate) => {
+              const rect = candidate.getBoundingClientRect();
+              return {
+                id: candidate.dataset.messageId,
+                top: rect.top - viewportContentTop,
+                bottom: rect.bottom - viewportContentTop
+              };
+            })
+            .filter((candidate) => candidate.bottom > 0 && candidate.top < viewport.clientHeight);
+
+          return {
+            scrollTop: viewport.scrollTop,
+            scrollHeight: viewport.scrollHeight,
+            clientHeight: viewport.clientHeight,
+            distanceToEnd: Math.max(0, viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop),
+            tailHeight: tail.getBoundingClientRect().height,
+            firstVisible: visibleItems[0] ?? null,
+            item: itemRect
+              ? {
+                  top: itemRect.top - viewportContentTop,
+                  bottom: itemRect.bottom - viewportContentTop
+                }
+              : null
+          };
+        }
+      };
+    </script>
+  </body>
+</html>

@@ -1,4 +1,6 @@
 import { LitElement, html, nothing, type TemplateResult } from "lit";
+import { repeat } from "lit/directives/repeat.js";
+import { MessageScrollerController } from "../controllers/message-scroller-controller";
 import { normalizeWidgetConfig, OBSERVED_CONFIG_ATTRIBUTES, readConfigFromElement } from "../domain/config";
 import { createIdempotencyKey } from "../domain/ids";
 import { buildSiteWidgetMessageRequest } from "../domain/request";
@@ -44,6 +46,7 @@ export class GranitSiteWidgetElement extends LitElement {
   private sessionStore?: WidgetSessionStore;
   private publicSessionId = "";
   private abortController: AbortController | undefined;
+  private readonly messageScroller = new MessageScrollerController(this);
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -119,6 +122,7 @@ export class GranitSiteWidgetElement extends LitElement {
     const effectivePanelSize = this.getEffectivePanelSize();
     const panelSizeButtonLabel = this.getPanelSizeButtonLabel();
     const panelSizeIconName = effectivePanelSize === "fullscreen" ? "minimize-2" : "maximize-2";
+    const scrollerSnapshot = this.messageScroller.getSnapshot();
     const pendingMessage = view.pending
       ? view.messages.find((message) => message.id === view.pending?.messageId)
       : undefined;
@@ -204,10 +208,46 @@ export class GranitSiteWidgetElement extends LitElement {
         </header>
 
         <div class="body" part="body">
-          <div class="messages" part="messages" role="log" aria-live="polite" aria-relevant="additions">
-            ${view.messages.map((message) =>
-              renderChatItem(message, { config: this.config, onRetry: this.retryPending })
-            )}
+          <div class="message-scroller">
+            <div
+              class="message-viewport"
+              part="message-viewport"
+              role="region"
+              aria-label="Сообщения"
+              tabindex="0"
+            >
+              <div
+                class="messages"
+                part="messages"
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions"
+                aria-busy=${String(view.submitting)}
+              >
+                ${repeat(
+                  view.messages,
+                  (message) => message.id,
+                  (message) => html`<div
+                    class="message-scroller__item"
+                    data-message-id=${message.id}
+                    data-scroll-anchor=${message.role === "visitor" ? "true" : nothing}
+                  >
+                    ${renderChatItem(message, { config: this.config, onRetry: this.retryPending })}
+                  </div>`
+                )}
+                <div class="message-scroller__tail" aria-hidden="true"></div>
+              </div>
+            </div>
+            ${scrollerSnapshot.canScrollEnd
+              ? html`<button
+                  class="jump-latest"
+                  part="jump-latest"
+                  type="button"
+                  @click=${() => this.messageScroller.scrollToEnd({ behavior: "smooth" })}
+                >
+                  ${scrollerSnapshot.newItemCount > 0 ? "Новые сообщения" : "К новым сообщениям"}
+                </button>`
+              : nothing}
           </div>
 
           ${view.showQuickReplies
@@ -305,7 +345,16 @@ export class GranitSiteWidgetElement extends LitElement {
 
   protected override updated(): void {
     this.autoGrowTextarea();
-    this.scrollMessagesToBottom();
+    const root = this.renderRoot.querySelector<HTMLElement>(".message-scroller");
+    const viewport = this.renderRoot.querySelector<HTMLElement>(".message-viewport");
+    const content = this.renderRoot.querySelector<HTMLElement>(".messages");
+    const tailSpacer = this.renderRoot.querySelector<HTMLElement>(".message-scroller__tail");
+    if (root && viewport && content && tailSpacer) {
+      this.messageScroller.connect({ root, viewport, content, tailSpacer });
+      this.messageScroller.reconcile(
+        this.state.messages.map((message) => ({ id: message.id, scrollAnchor: message.role === "visitor" }))
+      );
+    }
   }
 
   private boot(): void {
@@ -580,11 +629,6 @@ export class GranitSiteWidgetElement extends LitElement {
     if (!textarea) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 118)}px`;
-  }
-
-  private scrollMessagesToBottom(): void {
-    const messages = this.renderRoot.querySelector<HTMLElement>(".messages");
-    if (messages) messages.scrollTop = messages.scrollHeight;
   }
 
   private async focusInputSoon(): Promise<void> {
