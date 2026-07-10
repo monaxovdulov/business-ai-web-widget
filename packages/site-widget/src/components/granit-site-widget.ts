@@ -3,7 +3,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { ImageAttachmentController } from "../controllers/image-attachment-controller";
 import { MessageScrollerController } from "../controllers/message-scroller-controller";
 import { normalizeWidgetConfig, OBSERVED_CONFIG_ATTRIBUTES, readConfigFromElement } from "../domain/config";
-import { createIdempotencyKey } from "../domain/ids";
+import { createClientId, createIdempotencyKey } from "../domain/ids";
 import { buildSiteWidgetMessageRequest } from "../domain/request";
 import {
   applyWidgetAction,
@@ -51,6 +51,9 @@ export class GranitSiteWidgetElement extends LitElement {
   private readonly messageScroller = new MessageScrollerController(this);
   private readonly imageAttachments = new ImageAttachmentController(this);
   private sendMessageRequest = sendSiteWidgetMessage;
+  private readonly panelId = createClientId("sw-panel");
+  private readonly titleId = createClientId("sw-title");
+  private readonly phoneCaptureId = createClientId("sw-phone");
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -151,6 +154,7 @@ export class GranitSiteWidgetElement extends LitElement {
         type="button"
         aria-haspopup="dialog"
         aria-expanded=${String(view.open)}
+        aria-controls=${this.panelId}
         ?hidden=${view.open}
         @click=${() => this.open()}
       >
@@ -166,19 +170,20 @@ export class GranitSiteWidgetElement extends LitElement {
       ${this.renderMobileActions(view.showMobileActions)}
 
       <section
+        id=${this.panelId}
         class="panel"
         part="panel"
         data-size=${effectivePanelSize}
         role="dialog"
         aria-modal="false"
-        aria-label=${this.config.headerTitle}
+        aria-labelledby=${this.titleId}
         ?hidden=${!view.open}
         @keydown=${this.handlePanelKeydown}
       >
         <header class="header" part="header">
           <div class="brand-mark" part="brand-mark" aria-hidden="true">${widgetIcon("brand", 24)}</div>
           <div>
-            <h2 class="title" part="title">${this.config.headerTitle}</h2>
+            <h2 id=${this.titleId} class="title" part="title">${this.config.headerTitle}</h2>
             <div class="status" part="status">
               <span class="status__dot" aria-hidden="true"></span>
               <span>${this.config.headerStatus}</span>
@@ -273,6 +278,7 @@ export class GranitSiteWidgetElement extends LitElement {
                     part="quick-reply"
                     type="button"
                     @click=${() => this.handleQuickReply(reply.text ?? reply.value ?? reply.label)}
+                    @focus=${this.handleQuickReplyFocus}
                   >
                     ${reply.label}
                   </button>`
@@ -334,13 +340,20 @@ export class GranitSiteWidgetElement extends LitElement {
                   class="contact-trigger"
                   part="phone-trigger"
                   type="button"
+                  aria-expanded=${String(view.contactCaptureOpen)}
+                  aria-controls=${this.phoneCaptureId}
                   @click=${this.toggleContactCapture}
                 >
                   ${widgetIcon("plus", 18)}
                   <span>${view.contactLabel}</span>
                 </button>
               </div>
-              <div class="phone-capture" part="phone-capture" ?hidden=${!view.contactCaptureOpen}>
+              <div
+                id=${this.phoneCaptureId}
+                class="phone-capture"
+                part="phone-capture"
+                ?hidden=${!view.contactCaptureOpen}
+              >
                 <label class="visually-hidden" for="granit-site-widget-phone">${this.config.phoneCaptureLabel}</label>
                 <input
                   id="granit-site-widget-phone"
@@ -457,10 +470,6 @@ export class GranitSiteWidgetElement extends LitElement {
       event.preventDefault();
       void this.submitDraft();
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      this.close();
-    }
   };
 
   private handlePanelKeydown = (event: KeyboardEvent): void => {
@@ -481,6 +490,13 @@ export class GranitSiteWidgetElement extends LitElement {
       void this.focusInputSoon();
     }
   }
+
+  private handleQuickReplyFocus = (event: FocusEvent): void => {
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
+    }
+  };
 
   private renderMobileActions(show: boolean): TemplateResult | typeof nothing {
     if (!show) return nothing;

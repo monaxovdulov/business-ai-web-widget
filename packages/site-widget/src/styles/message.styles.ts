@@ -23,7 +23,7 @@ export const messageStyles = css`
     color: var(--sw-color-text-primary);
     max-width: 100%;
     min-width: 0;
-    padding: 15px 17px;
+    padding: 12px 14px;
   }
 
   .message--visitor {

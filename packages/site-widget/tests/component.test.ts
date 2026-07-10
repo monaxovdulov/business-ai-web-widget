@@ -48,6 +48,78 @@ describe("granit-site-widget Lit component", () => {
     expect(widget.shadowRoot?.activeElement?.classList.contains("launcher")).toBe(true);
   });
 
+  it("wires dialog, transcript, contact and live-region ARIA references", async () => {
+    const widget = mountSiteWidget({ mock: true, open: true, widgetInstanceId: "aria-contract" });
+    await widget.updateComplete;
+
+    const launcher = widget.shadowRoot?.querySelector<HTMLElement>('.launcher');
+    const panel = widget.shadowRoot?.querySelector<HTMLElement>('.panel');
+    const title = widget.shadowRoot?.querySelector<HTMLElement>('.title');
+    const viewport = widget.shadowRoot?.querySelector<HTMLElement>('.message-viewport');
+    const log = widget.shadowRoot?.querySelector<HTMLElement>('.messages');
+    const contactTrigger = widget.shadowRoot?.querySelector<HTMLElement>('[part~="phone-trigger"]');
+    const phoneCapture = widget.shadowRoot?.querySelector<HTMLElement>('[part~="phone-capture"]');
+    const live = widget.shadowRoot?.querySelector<HTMLElement>('[aria-live="polite"][aria-atomic="true"]');
+
+    expect(launcher?.getAttribute("aria-controls")).toBe(panel?.id);
+    expect(panel?.getAttribute("aria-labelledby")).toBe(title?.id);
+    expect(viewport).toMatchObject({ tabIndex: 0 });
+    expect(viewport?.getAttribute("role")).toBe("region");
+    expect(viewport?.getAttribute("aria-label")).toBe("Сообщения");
+    expect(log?.getAttribute("role")).toBe("log");
+    expect(log?.getAttribute("aria-relevant")).toBe("additions");
+    expect(log?.getAttribute("aria-busy")).toBe("false");
+    expect(live?.getAttribute("role")).toBe("status");
+    expect(contactTrigger?.getAttribute("aria-controls")).toBe(phoneCapture?.id);
+    expect(contactTrigger?.getAttribute("aria-expanded")).toBe("false");
+    expect(widget.shadowRoot?.querySelector('[part~="minimize-button"]')).toBeTruthy();
+
+    contactTrigger?.click();
+    await widget.updateComplete;
+    expect(contactTrigger?.getAttribute("aria-expanded")).toBe("true");
+    expect(phoneCapture?.hidden).toBe(false);
+  });
+
+  it("reflects pending work through aria-busy and an atomic status", async () => {
+    let resolveRequest: (value: { status: "replied"; replyText: string; raw: unknown }) => void = () => undefined;
+    const requestMock = vi.fn(
+      () =>
+        new Promise<{ status: "replied"; replyText: string; raw: unknown }>((resolve) => {
+          resolveRequest = resolve;
+        })
+    );
+    const widget = mountSiteWidget({ mock: true, open: true, widgetInstanceId: "aria-busy" });
+    (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+    await widget.updateComplete;
+
+    widget.sendMessage("Проверка статуса");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("true");
+      expect(widget.shadowRoot?.querySelector('[aria-atomic="true"]')?.textContent).toContain("Отправляем сообщение");
+    });
+
+    resolveRequest({ status: "replied", replyText: "Готово", raw: {} });
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("false");
+    });
+  });
+
+  it("handles Escape once and restores focus to the launcher", async () => {
+    const widget = mountSiteWidget({ mock: true, open: true, widgetInstanceId: "escape-once" });
+    const closed = vi.fn();
+    widget.addEventListener("granit-site-widget:closed", closed);
+    await widget.updateComplete;
+
+    widget.shadowRoot
+      ?.querySelector<HTMLTextAreaElement>('.textarea')
+      ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+    await widget.updateComplete;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(widget.shadowRoot?.activeElement?.classList.contains("launcher")).toBe(true);
+  });
+
   it("cycles visitor-controlled panel sizes and persists the choice", async () => {
     const widget = mountSiteWidget({
       mock: true,
@@ -246,6 +318,23 @@ describe("granit-site-widget Lit component", () => {
     expect(widget.shadowRoot?.textContent).not.toContain("Вложения будут доступны позже");
   });
 
+  it.each([
+    { attachmentsEnabled: false, showAttachmentSlot: true, label: "attachments disabled" },
+    { attachmentsEnabled: true, showAttachmentSlot: false, label: "slot hidden" }
+  ])("hides the mock photo picker when $label", async ({ attachmentsEnabled, showAttachmentSlot }) => {
+    const widget = mountSiteWidget({
+      mock: true,
+      open: true,
+      attachmentsEnabled,
+      showAttachmentSlot,
+      widgetInstanceId: `mock-gate-${String(attachmentsEnabled)}-${String(showAttachmentSlot)}`
+    });
+    await widget.updateComplete;
+
+    expect(widget.shadowRoot?.querySelector('.attach-button')).toBeNull();
+    expect(widget.shadowRoot?.querySelector('.attachment-input')).toBeNull();
+  });
+
   it("accepts a valid mock photo preview but still requires message text", async () => {
     const imageEnvironment = installImageTestEnvironment();
     try {
@@ -304,6 +393,143 @@ describe("granit-site-widget Lit component", () => {
           "поддерживаются только JPEG, PNG и WebP"
         );
       });
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("exposes photo parts, labels, count updates and deterministic remove focus", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-a11y"
+      });
+      await widget.updateComplete;
+
+      const picker = widget.shadowRoot?.querySelector<HTMLButtonElement>('[part~="attach-button"]');
+      expect(picker?.getAttribute("aria-label")).toBe("Добавить фото");
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [
+        validPngFile("first.png"),
+        validPngFile("second.png")
+      ]);
+      await vi.waitFor(() => expect(widget.shadowRoot?.querySelectorAll('[part~="attachment-remove"]')).toHaveLength(2));
+
+      const list = widget.shadowRoot?.querySelector('[part~="attachment-list"]');
+      const removeButtons = [
+        ...(widget.shadowRoot?.querySelectorAll<HTMLButtonElement>('[part~="attachment-remove"]') ?? [])
+      ];
+      const secondId = removeButtons[1]?.dataset.attachmentId;
+      expect(list?.getAttribute("aria-label")).toBe("Выбранные фото");
+      expect(widget.shadowRoot?.querySelectorAll('[part~="attachment"]')).toHaveLength(2);
+      expect(widget.shadowRoot?.querySelectorAll('[part~="attachment-preview"]')).toHaveLength(2);
+      expect(removeButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
+        "Удалить фото 1",
+        "Удалить фото 2"
+      ]);
+      expect(widget.shadowRoot?.textContent).toContain("Выбрано фото: 2");
+
+      removeButtons[0]?.click();
+      await widget.updateComplete;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect((widget.shadowRoot?.activeElement as HTMLElement | null)?.dataset.attachmentId).toBe(secondId);
+      expect(widget.shadowRoot?.textContent).toContain("Выбрано фото: 1");
+
+      widget.shadowRoot?.querySelector<HTMLButtonElement>('[part~="attachment-remove"]')?.click();
+      await widget.updateComplete;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(widget.shadowRoot?.activeElement?.classList.contains("attach-button")).toBe(true);
+      expect(widget.shadowRoot?.textContent).toContain("Выбрано фото: 0");
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("recreates an identical validation alert so it can be announced again", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-alert-revision"
+      });
+      await widget.updateComplete;
+      const invalid = new File(["GIF89a"], "invalid.gif", { type: "image/gif" });
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [invalid]);
+      let firstAlert: Element | null | undefined;
+      let firstRevision = "";
+      await vi.waitFor(() => {
+        firstAlert = widget.shadowRoot?.querySelector('[role="alert"]');
+        firstRevision = firstAlert?.getAttribute("data-validation-revision") ?? "";
+        expect(firstRevision).not.toBe("");
+      });
+
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [invalid]);
+      await vi.waitFor(() => {
+        const nextAlert = widget.shadowRoot?.querySelector('[role="alert"]');
+        expect(nextAlert?.getAttribute("data-validation-revision")).not.toBe(firstRevision);
+        expect(nextAlert).not.toBe(firstAlert);
+      });
+    } finally {
+      imageEnvironment.restore();
+    }
+  });
+
+  it("rejects spoofed MIME, decoder failure and oversized pixels before creating a permanent URL", async () => {
+    const imageEnvironment = installImageTestEnvironment();
+    try {
+      const widget = mountSiteWidget({
+        mock: true,
+        open: true,
+        attachmentsEnabled: true,
+        showAttachmentSlot: true,
+        widgetInstanceId: "photo-validation-pipeline"
+      });
+      await widget.updateComplete;
+
+      const spoofed = new File(
+        [Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+        "spoofed.jpg",
+        { type: "image/jpeg" }
+      );
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [spoofed]);
+      await vi.waitFor(() => {
+        expect(widget.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+          "тип файла не совпадает с его содержимым"
+        );
+      });
+      expect(imageEnvironment.createImageBitmap).not.toHaveBeenCalled();
+      expect(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
+
+      imageEnvironment.createImageBitmap.mockRejectedValueOnce(new Error("decode failed"));
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("decode.png")]);
+      await vi.waitFor(() => {
+        expect(widget.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+          "изображений не удалось прочитать"
+        );
+      });
+      expect(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
+
+      const closeBitmap = vi.fn();
+      imageEnvironment.createImageBitmap.mockResolvedValueOnce({
+        width: 6001,
+        height: 4000,
+        close: closeBitmap
+      } as unknown as ImageBitmap);
+      selectFiles(widget.shadowRoot?.querySelector<HTMLInputElement>('.attachment-input'), [validPngFile("pixels.png")]);
+      await vi.waitFor(() => {
+        expect(widget.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+          "разрешение одного фото слишком большое"
+        );
+      });
+      expect(closeBitmap).toHaveBeenCalledTimes(1);
+      expect(imageEnvironment.createObjectURL).not.toHaveBeenCalled();
     } finally {
       imageEnvironment.restore();
     }

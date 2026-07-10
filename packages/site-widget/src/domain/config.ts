@@ -240,9 +240,9 @@ export function applyOptionsToElement(element: HTMLElement, options: MountSiteWi
 
   setBooleanAttr(element, "mock", normalized.mock);
   setBooleanAttr(element, "persist-open-state", normalized.persistOpenState);
-  setBooleanAttr(element, "show-quick-actions", normalized.showQuickActions);
-  setBooleanAttr(element, "show-mobile-actions", normalized.showMobileActions);
-  setBooleanAttr(element, "show-attachment-slot", normalized.showAttachmentSlot);
+  setAttr(element, "show-quick-actions", String(normalized.showQuickActions));
+  setAttr(element, "show-mobile-actions", String(normalized.showMobileActions));
+  setAttr(element, "show-attachment-slot", String(normalized.showAttachmentSlot));
   setBooleanAttr(element, "attachments-enabled", normalized.attachmentsEnabled);
   setBooleanAttr(element, "collect-phone-after-first-message", normalized.collectPhoneAfterFirstMessage);
   setBooleanAttr(element, "include-message-text-in-events", normalized.includeMessageTextInEvents);
