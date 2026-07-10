@@ -12,7 +12,7 @@ import { messageStyles } from "../styles/message.styles";
 import { widgetStyles } from "../styles/widget.styles";
 import type { SiteWidgetAction, SiteWidgetConfig, SiteWidgetContact, SiteWidgetPanelSize } from "../types/public";
 import { widgetIcon } from "../ui/icons";
-import { renderWidgetMessage } from "./widget-message";
+import { renderChatItem } from "./widget-message";
 
 export const SITE_WIDGET_TAG_NAME = "granit-site-widget";
 
@@ -189,7 +189,9 @@ export class GranitSiteWidgetElement extends LitElement {
 
         <div class="body" part="body">
           <div class="messages" part="messages" role="log" aria-live="polite" aria-relevant="additions">
-            ${view.messages.map((message) => renderWidgetMessage(message, this.config))}
+            ${view.messages.map((message) =>
+              renderChatItem(message, { config: this.config, onRetry: this.retryPending })
+            )}
           </div>
 
           ${view.showQuickReplies
@@ -245,16 +247,6 @@ export class GranitSiteWidgetElement extends LitElement {
               ${widgetIcon("send")}
             </button>
           </form>
-
-          <button
-            class="retry-button"
-            part="retry-button"
-            type="button"
-            ?hidden=${!view.pending || view.submitting}
-            @click=${this.retryPending}
-          >
-            ${this.config.retryLabel}
-          </button>
 
           ${view.showContactTrigger
             ? html`<div class="contact-row" part="contact-row">
@@ -478,8 +470,9 @@ export class GranitSiteWidgetElement extends LitElement {
     await this.sendPending(text, idempotencyKey);
   }
 
-  private retryPending = async (): Promise<void> => {
+  private retryPending = async (messageId?: string): Promise<void> => {
     if (!this.state.pending || this.state.submitting) return;
+    if (messageId && messageId !== this.state.pending.messageId) return;
     const { text, idempotencyKey } = this.state.pending;
     this.state = applyWidgetAction(this.state, { type: "retry.started" }, this.config);
     this.requestUpdate();

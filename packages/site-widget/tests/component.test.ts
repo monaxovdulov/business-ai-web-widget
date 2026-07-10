@@ -106,4 +106,96 @@ describe("granit-site-widget Lit component", () => {
     expect(messages?.innerHTML).toContain("&lt;img");
     expect(messages?.querySelector("img")).toBeNull();
   });
+
+  it("renders assistant and visitor messages through additive message primitives", async () => {
+    const widget = mountSiteWidget({ mock: true, open: true, widgetInstanceId: "message-primitives" });
+    await widget.updateComplete;
+
+    widget.sendMessage("Нужен расчет");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelectorAll('[part~="message-root"]')).toHaveLength(3);
+    });
+    await widget.updateComplete;
+
+    const assistantBubble = widget.shadowRoot?.querySelector('[part~="message-assistant"]');
+    const visitorBubble = widget.shadowRoot?.querySelector('[part~="message-visitor"]');
+    const disclosure = widget.shadowRoot?.querySelector('[part~="message-disclosure"]');
+
+    expect(assistantBubble?.getAttribute("part")?.split(" ")).toEqual(
+      expect.arrayContaining(["message", "message-assistant", "message-bubble"])
+    );
+    expect(visitorBubble?.getAttribute("part")?.split(" ")).toEqual(
+      expect.arrayContaining(["message", "message-visitor", "message-bubble"])
+    );
+    expect(visitorBubble?.closest('[part~="message-root"]')).toBeTruthy();
+    expect(disclosure?.closest('[part~="message-meta"]')).toBeTruthy();
+  });
+
+  it.each(["fallback", "disabled"] as const)("renders %s responses as semantic markers", async (status) => {
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: `marker-${status}`
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ automation: { status } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    await widget.updateComplete;
+    widget.sendMessage("Передайте менеджеру");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('[part~="marker"]')).toBeTruthy();
+    });
+
+    const marker = widget.shadowRoot?.querySelector<HTMLElement>('[part~="marker"]');
+    expect(marker?.getAttribute("part")?.split(" ")).toEqual(
+      expect.arrayContaining(["message", "message-system", "marker"])
+    );
+    expect(marker?.dataset.systemKind).toBe(status);
+    expect(marker?.getAttribute("role")).toBe("status");
+    expect(marker?.querySelector('[part~="marker-icon"]')).toBeTruthy();
+    expect(marker?.querySelector('[part~="marker-text"]')).toBeTruthy();
+  });
+
+  it("keeps one inline error and retries the same visitor bubble with the same idempotency key", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (requests.length === 1) throw new Error("offline");
+      return new Response(
+        JSON.stringify({ automation: { status: "replied", reply: { text: "Принято", persisted: true } } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "inline-retry"
+    });
+
+    await widget.updateComplete;
+    widget.sendMessage("Проверьте заказ");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelectorAll('[part~="retry-button"]')).toHaveLength(1);
+    });
+
+    expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(1);
+    expect(widget.shadowRoot?.querySelectorAll('[part~="marker"]')).toHaveLength(0);
+    expect(widget.shadowRoot?.textContent).toContain("Не отправлено");
+
+    widget.shadowRoot?.querySelector<HTMLButtonElement>('[part~="retry-button"]')?.click();
+    await vi.waitFor(() => {
+      expect(requests).toHaveLength(2);
+      expect(widget.shadowRoot?.textContent).toContain("Принято");
+    });
+
+    expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(1);
+    expect(requests[0]?.idempotency_key).toBe(requests[1]?.idempotency_key);
+  });
 });
