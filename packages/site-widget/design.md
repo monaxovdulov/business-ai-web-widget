@@ -431,7 +431,7 @@ AI disclosure default:
 - A focusable labelled region contains a `role="log"` transcript and an atomic status live region.
 - Input label is available for screen readers.
 - Focus is never trapped; the dialog is non-modal and Escape returns focus to the launcher.
-- Escape closes or minimizes panel depending on config.
+- Escape closes the panel.
 - All clickable controls are at least `44px` high.
 - Focus ring uses `color.accent` with sufficient contrast.
 
@@ -473,7 +473,7 @@ granit-site-widget[theme="minimal-dark-accent"] {
 
 ```css
 granit-site-widget[theme="light-catalog"] {
-  --sw-color-accent: #7c8a6a;
+  --sw-color-accent: #647252;
   --sw-color-surface-panel: #fbfbf7;
   --sw-color-surface-message-visitor: #e9eee2;
   --sw-color-text-primary: #252821;

@@ -512,7 +512,7 @@ export const widgetStyles = css`
     background: transparent;
     border: 0;
     color: var(--sw-color-text-primary);
-    min-height: 40px;
+    min-height: 44px;
     max-height: 118px;
     outline: 0;
     overflow-y: auto;

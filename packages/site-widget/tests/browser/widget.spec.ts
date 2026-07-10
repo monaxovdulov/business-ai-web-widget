@@ -358,7 +358,9 @@ async function assertResponsiveLayout(page: Page): Promise<void> {
     const headerActions = [...root.querySelectorAll<HTMLElement>('[part~="resize-button"], [part~="close-button"]')]
       .filter((element) => element.getClientRects().length > 0)
       .map((element) => toMetrics(element.getBoundingClientRect()));
-    const hitTargets = [...root.querySelectorAll<HTMLElement>("button, a.mobile-action")]
+    const hitTargets = [
+      ...root.querySelectorAll<HTMLElement>("button, a.mobile-action, textarea, input:not([type='file'])")
+    ]
       .filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden")
       .map((element) => ({
         ...toMetrics(element.getBoundingClientRect()),
