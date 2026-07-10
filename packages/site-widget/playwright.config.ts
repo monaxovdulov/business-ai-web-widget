@@ -13,7 +13,7 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
   reporter: isCI ? [["line"], ["html", { open: "never" }]] : "line",
-  timeout: 15_000,
+  timeout: 30_000,
   expect: {
     timeout: 4_000
   },

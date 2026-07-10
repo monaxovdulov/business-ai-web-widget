@@ -462,20 +462,20 @@ export const widgetStyles = css`
     border-radius: 12px;
     display: grid;
     flex: 0 0 auto;
-    gap: 8px;
-    grid-template-columns: 48px minmax(54px, 1fr) 44px;
-    min-width: 162px;
+    gap: 6px;
+    grid-template-columns: 44px minmax(42px, 1fr) 44px;
+    min-width: 152px;
     overflow: hidden;
-    padding: 5px 5px 5px 6px;
+    padding: 4px;
   }
 
   .attachment__preview {
     background: var(--sw-color-surface-system);
     border-radius: 8px;
     display: block;
-    height: 48px;
+    height: 44px;
     object-fit: cover;
-    width: 48px;
+    width: 44px;
   }
 
   .attachment__details {
@@ -778,6 +778,44 @@ export const widgetStyles = css`
       gap: 4px;
     }
 
+  }
+
+  @media (max-height: 500px) and (orientation: landscape) {
+    .header {
+      grid-template-columns: 40px minmax(0, 1fr) auto;
+      min-height: 76px;
+      padding: 10px 16px;
+    }
+
+    .brand-mark {
+      height: 40px;
+      width: 40px;
+    }
+
+    .title {
+      font-size: 18px;
+      margin-bottom: 3px;
+    }
+
+    .status {
+      font-size: 12px;
+      gap: 5px;
+    }
+
+    .body {
+      gap: 6px;
+      padding: 8px 16px;
+    }
+
+    .composer-shell {
+      padding: 8px 16px 10px;
+    }
+
+    .contact-row,
+    .phone-capture,
+    .footer-note {
+      display: none;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
