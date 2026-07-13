@@ -69,8 +69,7 @@ test("wheel и keyboard освобождают чтение, latest возвра
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -420);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -420);
 
   const beforeAppend = await metrics(page);
   await append(page, [
@@ -125,8 +124,7 @@ test("prepend сохраняет stable id и viewport-relative offset", async (
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -650);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -650);
 
   const before = await metrics(page);
   expect(before.firstVisible).not.toBeNull();
@@ -145,8 +143,7 @@ test("reopen и resize не сбрасывают free-scrolling", async ({ page 
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -500);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -500);
   const before = await metrics(page);
 
   await page.evaluate(async () => {
@@ -192,8 +189,7 @@ test("prefers-reduced-motion заменяет latest smooth на auto", async ({
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -400);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -400);
   await page.evaluate(() => (window as FixtureWindow).messageScrollerFixture.clearScrollCalls());
 
   await page.getByTestId("jump-latest").click();
@@ -225,8 +221,7 @@ test("smooth latest с немедленным append и resize завершае�
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -420);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -420);
 
   await page.getByTestId("jump-latest").click();
   await append(page, [{ id: "during-smooth-jump", height: 72 }]);
@@ -246,8 +241,7 @@ test("detach и reinsert ReactiveController host восстанавливают 
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -420);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -420);
 
   const beforeAppend = await metrics(page);
   await append(page, [{ id: "after-reinsert", height: 72 }]);
@@ -325,8 +319,7 @@ test("batched prepend и append сохраняют reading position и счит�
   const viewport = page.getByTestId("viewport");
 
   await viewport.hover();
-  await page.mouse.wheel(0, -650);
-  await expectSnapshot(page, (snapshot) => snapshot.mode === "free-scrolling");
+  await wheelAwayFromLiveEdge(page, -650);
   const before = await metrics(page);
   expect(before.firstVisible).not.toBeNull();
 
@@ -414,6 +407,12 @@ async function waitForFixture(page: Page): Promise<void> {
 
 async function expectAtEnd(page: Page): Promise<void> {
   await expect.poll(async () => (await metrics(page)).distanceToEnd).toBeLessThanOrEqual(8);
+}
+
+async function wheelAwayFromLiveEdge(page: Page, deltaY: number): Promise<void> {
+  await page.mouse.wheel(0, deltaY);
+  await expect.poll(async () => (await metrics(page)).distanceToEnd).toBeGreaterThan(8);
+  await expectSnapshot(page, (value) => value.mode === "free-scrolling");
 }
 
 async function expectSnapshot(page: Page, predicate: (value: ScrollerSnapshot) => boolean): Promise<void> {
