@@ -2,7 +2,7 @@
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "siteWidget": {
     "color": {
-      "accent": { "value": "#a98b6d" },
+      "accent": { "value": "#8a6f55" },
       "accentText": { "value": "#ffffff" },
       "surfacePanel": { "value": "#fffdf9" },
       "surfaceRaised": { "value": "#ffffff" },
@@ -10,7 +10,7 @@
       "surfaceSystem": { "value": "#f7f3ee" },
       "textPrimary": { "value": "#2f2d2a" },
       "textSecondary": { "value": "#716d67" },
-      "textMuted": { "value": "#9b948c" },
+      "textMuted": { "value": "#766f68" },
       "border": { "value": "rgba(55, 48, 40, 0.10)" },
       "success": { "value": "#68c75a" },
       "error": { "value": "#b84b3f" }
@@ -30,8 +30,11 @@
       "input": { "value": "999px" }
     },
     "size": {
-      "panelWidth": { "value": "640px" },
-      "panelWideWidth": { "value": "860px" },
+      "panelWidth": { "value": "520px" },
+      "panelNormalWidth": { "value": "520px" },
+      "panelWideWidth": { "value": "640px" },
+      "headerHeight": { "value": "94px" },
+      "interactiveMinHeight": { "value": "44px" },
       "panelFullscreenInset": { "value": "24px" },
       "panelMaxHeight": { "value": "min(760px, calc(100vh - 48px))" }
     },

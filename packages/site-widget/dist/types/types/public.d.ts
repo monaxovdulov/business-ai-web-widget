@@ -82,6 +82,7 @@ export type SiteWidgetResponseViewModel = {
 };
 export type WidgetMessageRole = "assistant" | "visitor" | "system";
 export type WidgetMessageStatus = "pending" | "sent" | "error";
+export type WidgetSystemKind = "fallback" | "disabled";
 export type WidgetMessage = {
     id: string;
     role: WidgetMessageRole;
@@ -89,6 +90,7 @@ export type WidgetMessage = {
     createdAt: string;
     status: WidgetMessageStatus;
     disclosure?: boolean | undefined;
+    systemKind?: WidgetSystemKind | undefined;
 };
 export type SiteWidgetEventName = "ready" | "opened" | "closed" | "message-submitted" | "response-received" | "fallback-shown" | "error" | "action-clicked" | "phone-saved";
 export type SiteWidgetConfig = {

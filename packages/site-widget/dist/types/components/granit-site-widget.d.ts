@@ -9,7 +9,14 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private hasBooted;
     private sessionStore?;
     private publicSessionId;
-    private abortController?;
+    private abortController;
+    private operationEpoch;
+    private readonly messageScroller;
+    private readonly imageAttachments;
+    private sendMessageRequest;
+    private readonly panelId;
+    private readonly titleId;
+    private readonly phoneCaptureId;
     connectedCallback(): void;
     disconnectedCallback(): void;
     attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void;
@@ -33,6 +40,7 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private handleTextareaKeydown;
     private handlePanelKeydown;
     private handleQuickReply;
+    private handleQuickReplyFocus;
     private renderMobileActions;
     private renderMobileAction;
     private handleMobileAction;
@@ -43,9 +51,12 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private submitDraft;
     private retryPending;
     private sendPending;
+    private invalidateActiveWork;
     private buildContact;
+    private isPhotoPreviewEnabled;
+    private handleAttachmentFiles;
+    private handleRemoveAttachment;
     private autoGrowTextarea;
-    private scrollMessagesToBottom;
     private focusInputSoon;
     private focusLauncherSoon;
 }
