@@ -84,7 +84,7 @@ test("replied сохраняет strict site_widget.v1 и production не пок
   const captured = await interceptApi(page, [
     {
       body: {
-        public_session_id: "sws_browser_replied",
+        public_session_id: "55555555-5555-4555-8555-555555555555",
         automation: {
           status: "replied",
           reply: { text: "Подготовим варианты и передадим менеджеру.", persisted: true }
@@ -105,6 +105,7 @@ test("replied сохраняет strict site_widget.v1 и production не пок
   expect(request?.body.schema_version).toBe("site_widget.v1");
   expect(request?.body.event_type).toBe("site_widget.message_submitted");
   expect(request?.body.message).toStrictEqual({ role: "visitor", text: "Нужен расчет памятника" });
+  expect(request?.body.public_session_id).toBeUndefined();
   expect(allKeys(request?.body)).not.toEqual(expect.arrayContaining(["attachments", "file", "filename", "mimeType"]));
   expect(widget(page).locator(".message-attachment__preview")).toHaveCount(0);
   await saveScreenshot(page, "replied-desktop");
@@ -115,7 +116,7 @@ test("error остаётся одной зоной, retry сохраняет mes
     { status: 500, body: { message: "temporary browser failure" } },
     {
       body: {
-        public_session_id: "sws_browser_retry",
+        public_session_id: "66666666-6666-4666-8666-666666666666",
         automation: {
           status: "replied",
           reply: { text: "Повторная отправка принята.", persisted: true }
@@ -142,6 +143,8 @@ test("error остаётся одной зоной, retry сохраняет mes
 
   expect(captured).toHaveLength(2);
   expect(captured[0]?.body.idempotency_key).toBe(captured[1]?.body.idempotency_key);
+  expect(captured[0]?.body.public_session_id).toBeUndefined();
+  expect(captured[1]?.body.public_session_id).toBeUndefined();
   expect(await visitorRoot.evaluate((root) => root.closest("[data-message-id]")?.getAttribute("data-message-id"))).toBe(
     messageId
   );
@@ -153,7 +156,7 @@ test("fallback рендерится Marker и проходит axe", async ({ pa
   await interceptApi(page, [
     {
       body: {
-        public_session_id: "sws_browser_fallback",
+        public_session_id: "77777777-7777-4777-8777-777777777777",
         automation: {
           status: "fallback",
           message: "Менеджер проверит детали и ответит вам.",
@@ -177,7 +180,7 @@ test("disabled также использует Marker", async ({ page }) => {
   await interceptApi(page, [
     {
       body: {
-        public_session_id: "sws_browser_disabled",
+        public_session_id: "88888888-8888-4888-8888-888888888888",
         automation: {
           status: "disabled",
           message: "Автоответ отключён, менеджер ответит вручную."
@@ -218,6 +221,7 @@ test("keyboard-only flow открывает, отправляет и закры�
   await interceptApi(page, [
     {
       body: {
+        public_session_id: "99999999-9999-4999-8999-999999999999",
         automation: {
           status: "replied",
           reply: { text: "Keyboard flow принят.", persisted: true }

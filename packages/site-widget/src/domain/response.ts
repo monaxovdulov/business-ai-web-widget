@@ -1,13 +1,14 @@
 import type { SiteWidgetConfig, SiteWidgetResponseViewModel } from "../types/public";
+import { normalizePublicSessionId } from "./public-session";
 
 export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): SiteWidgetResponseViewModel {
   const record = asRecord(body) ?? {};
   const automation = asRecord(record.automation) ?? {};
   const status = stringValue(automation.status);
   const publicSessionId =
-    stringValue(record.public_session_id) ??
-    stringValue(asRecord(record.session)?.public_session_id) ??
-    stringValue(record.publicSessionId);
+    normalizePublicSessionId(record.public_session_id) ??
+    normalizePublicSessionId(asRecord(record.session)?.public_session_id) ??
+    normalizePublicSessionId(record.publicSessionId);
 
   if (status === "replied") {
     const reply = asRecord(automation.reply) ?? asRecord(record.reply) ?? {};

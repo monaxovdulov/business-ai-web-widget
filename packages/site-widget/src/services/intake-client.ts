@@ -33,7 +33,11 @@ export async function sendSiteWidgetMessage(
       throw new Error(readErrorMessage(body) ?? `Widget request failed with HTTP ${response.status}`);
     }
 
-    return mapSiteWidgetResponse(body, config);
+    const mapped = mapSiteWidgetResponse(body, config);
+    if (!mapped.publicSessionId) {
+      throw new Error("Widget response is missing a valid public_session_id");
+    }
+    return mapped;
   } finally {
     globalThis.clearTimeout(timeout);
     signal?.removeEventListener("abort", abortForwarder);

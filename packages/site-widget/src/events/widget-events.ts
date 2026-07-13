@@ -36,7 +36,8 @@ export function sanitizeEventDetail(detail: SiteWidgetEventDetail, config: SiteW
   };
 
   if (typeof result.publicSessionId === "string") {
-    result.publicSessionIdHash = stableHash(result.publicSessionId);
+    const publicSessionId = result.publicSessionId.trim();
+    if (publicSessionId) result.publicSessionIdHash = stableHash(publicSessionId);
     delete result.publicSessionId;
   }
 

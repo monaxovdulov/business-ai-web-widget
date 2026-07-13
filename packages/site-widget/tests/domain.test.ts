@@ -1,12 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { normalizeWidgetConfig, parseQuickReplies, readConfigFromElement } from "../src/domain/config";
 import { createIdempotencyKey } from "../src/domain/ids";
+import { normalizePublicSessionId } from "../src/domain/public-session";
 import { buildSiteWidgetMessageRequest } from "../src/domain/request";
 import { mapSiteWidgetResponse } from "../src/domain/response";
 import { applyWidgetAction, createWidgetState } from "../src/domain/state";
 import { buildWidgetViewModel } from "../src/domain/view-model";
 import { emitSiteWidgetEvent } from "../src/events/widget-events";
+import { sendSiteWidgetMessage } from "../src/services/intake-client";
 import { createSessionStore } from "../src/services/session-store";
+
+const firstSessionId = "11111111-1111-4111-8111-111111111111";
+const secondSessionId = "22222222-2222-4222-8222-222222222222";
 
 describe("site widget domain", () => {
   it("normalizes public config and keeps quick replies in prefill mode by default", () => {
@@ -37,7 +42,7 @@ describe("site widget domain", () => {
     const request = buildSiteWidgetMessageRequest({
       config,
       text: " Сколько стоит? ",
-      publicSessionId: "sws_1",
+      publicSessionId: firstSessionId,
       idempotencyKey: "idem_1",
       contact: { phone: " +79990000000 ", email: "" },
       environment: {
@@ -56,6 +61,27 @@ describe("site widget domain", () => {
     expect(request.source.utm).toEqual({ source: "ads", campaign: "summer" });
     expect(request.contact).toEqual({ phone: "+79990000000" });
     expect(request.message.text).toBe("Сколько стоит?");
+    expect(request.public_session_id).toBe(firstSessionId);
+  });
+
+  it("omits public_session_id before the backend establishes a session", () => {
+    const request = buildSiteWidgetMessageRequest({
+      config: normalizeWidgetConfig({ apiBaseUrl: "https://ops.example.com" }),
+      text: "Первое сообщение",
+      publicSessionId: "",
+      idempotencyKey: "idem_without_session",
+      environment: {
+        href: "https://example.com/",
+        search: "",
+        title: "Landing",
+        referrer: "",
+        locale: "ru-RU",
+        timezone: "Europe/Moscow",
+        now: "2026-07-13T00:00:00.000Z"
+      }
+    });
+
+    expect(request.public_session_id).toBeUndefined();
   });
 
   it("maps backend responses through the display gate", () => {
@@ -74,6 +100,62 @@ describe("site widget domain", () => {
       mapSiteWidgetResponse({ automation: { status: "fallback", reply: { text: "AI draft" } } }, config)
     ).toMatchObject({ status: "fallback", systemText: config.fallbackMessage });
   });
+
+  it("accepts only UUID public sessions from backend responses", () => {
+    const config = normalizeWidgetConfig();
+
+    expect(
+      mapSiteWidgetResponse(
+        { public_session_id: firstSessionId, automation: { status: "disabled" } },
+        config
+      ).publicSessionId
+    ).toBe(firstSessionId);
+    expect(
+      mapSiteWidgetResponse(
+        { public_session_id: "sws_legacy", automation: { status: "disabled" } },
+        config
+      ).publicSessionId
+    ).toBeUndefined();
+    expect(normalizePublicSessionId(` ${firstSessionId.toUpperCase()} `)).toBe(firstSessionId);
+  });
+
+  it.each([undefined, "sws_legacy", "not-a-uuid"])(
+    "fails a real response without a valid backend session: %s",
+    async (publicSessionId) => {
+      const config = normalizeWidgetConfig({ apiBaseUrl: "https://ops.example.com" });
+      const request = buildSiteWidgetMessageRequest({
+        config,
+        text: "Проверка protocol failure",
+        idempotencyKey: "idem_protocol_failure",
+        environment: {
+          href: "https://example.com/",
+          search: "",
+          title: "Landing",
+          referrer: "",
+          locale: "ru-RU",
+          timezone: "Europe/Moscow",
+          now: "2026-07-13T00:00:00.000Z"
+        }
+      });
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            public_session_id: publicSessionId,
+            automation: { status: "disabled", message: "Менеджер ответит вручную" }
+          }),
+          { status: 202, headers: { "content-type": "application/json" } }
+        )
+      );
+
+      try {
+        await expect(sendSiteWidgetMessage(config, request)).rejects.toThrow(
+          "Widget response is missing a valid public_session_id"
+        );
+      } finally {
+        fetchMock.mockRestore();
+      }
+    }
+  );
 
   it("keeps the same idempotency key while retrying a failed pending message", () => {
     const config = normalizeWidgetConfig();
@@ -236,7 +318,7 @@ describe("site widget domain", () => {
     }
 
     emitSiteWidgetEvent(element, "message-submitted", config, {
-      publicSessionId: "sws_private",
+      publicSessionId: firstSessionId,
       messageText: "Полный текст"
     });
 
@@ -247,6 +329,24 @@ describe("site widget domain", () => {
     expect(seen[0]?.detail.publicSessionIdHash).toMatch(/^h/);
   });
 
+  it("does not invent a public session hash before the backend session exists", () => {
+    const config = normalizeWidgetConfig({ widgetInstanceId: "main" });
+    const element = document.createElement("div");
+    let detail: Record<string, unknown> = {};
+    element.addEventListener("granit-site-widget:message-submitted", (event) => {
+      detail = (event as CustomEvent).detail;
+    });
+
+    emitSiteWidgetEvent(element, "message-submitted", config, {
+      publicSessionId: "",
+      messageText: "Первое сообщение"
+    });
+
+    expect(detail.publicSessionId).toBeUndefined();
+    expect(detail.publicSessionIdHash).toBeUndefined();
+    expect(detail.messageLength).toBe("Первое сообщение".length);
+  });
+
   it("keeps generated idempotency keys opaque from the public session id", () => {
     const key = createIdempotencyKey("sws_private_session");
 
@@ -254,15 +354,29 @@ describe("site widget domain", () => {
     expect(key).not.toContain("sws_private_session");
   });
 
-  it("uses v1 storage keys and supports separate widget instances", () => {
+  it("keeps public session storage empty until a backend UUID is received", () => {
+    const store = createSessionStore("empty-session");
+
+    expect(store.getPublicSessionId()).toBe("");
+    expect(localStorage.getItem("sw:empty-session:public_session_id")).toBeNull();
+  });
+
+  it("removes legacy sessions and stores only backend UUIDs per widget instance", () => {
     const first = createSessionStore("first");
     const second = createSessionStore("second");
 
-    first.setPublicSessionId("sws_first");
-    second.setPublicSessionId("sws_second");
+    localStorage.setItem("sw:first:public_session_id", "sws_legacy");
+    expect(first.getPublicSessionId()).toBe("");
+    expect(localStorage.getItem("sw:first:public_session_id")).toBeNull();
 
-    expect(localStorage.getItem("sw:first:public_session_id")).toBe("sws_first");
-    expect(localStorage.getItem("sw:second:public_session_id")).toBe("sws_second");
+    first.setPublicSessionId(firstSessionId);
+    second.setPublicSessionId(secondSessionId);
+    first.setPublicSessionId("sws_rejected");
+
+    expect(first.getPublicSessionId()).toBe(firstSessionId);
+    expect(second.getPublicSessionId()).toBe(secondSessionId);
+    expect(localStorage.getItem("sw:first:public_session_id")).toBe(firstSessionId);
+    expect(localStorage.getItem("sw:second:public_session_id")).toBe(secondSessionId);
   });
 
   it("stores the visitor-selected panel size per widget instance", () => {

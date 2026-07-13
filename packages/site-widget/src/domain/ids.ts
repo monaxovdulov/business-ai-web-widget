@@ -1,10 +1,4 @@
-const SESSION_PREFIX = "sws";
-
 export function createClientId(prefix = "id"): string {
-  return `${prefix}_${randomToken()}`;
-}
-
-export function createPublicSessionId(prefix = SESSION_PREFIX): string {
   return `${prefix}_${randomToken()}`;
 }
 

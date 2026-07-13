@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { defineSiteWidget, mountSiteWidget } from "../src";
 import type { GranitSiteWidgetElement } from "../src/components/granit-site-widget";
 
+const BACKEND_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000";
+
 describe("granit-site-widget Lit component", () => {
   it("defines only the public custom element", () => {
     defineSiteWidget();
@@ -158,6 +160,7 @@ describe("granit-site-widget Lit component", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
+          public_session_id: BACKEND_SESSION_ID,
           automation: {
             status: "replied",
             reply: { text: "<img src=x onerror=alert(1)>safe" }
@@ -211,7 +214,7 @@ describe("granit-site-widget Lit component", () => {
       widgetInstanceId: `marker-${status}`
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ automation: { status } }), {
+      new Response(JSON.stringify({ public_session_id: BACKEND_SESSION_ID, automation: { status } }), {
         status: 200,
         headers: { "content-type": "application/json" }
       })
@@ -240,7 +243,10 @@ describe("granit-site-widget Lit component", () => {
       requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       if (requests.length === 1) throw new Error("offline");
       return new Response(
-        JSON.stringify({ automation: { status: "replied", reply: { text: "Принято", persisted: true } } }),
+        JSON.stringify({
+          public_session_id: BACKEND_SESSION_ID,
+          automation: { status: "replied", reply: { text: "Принято", persisted: true } }
+        }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     });
@@ -682,6 +688,8 @@ describe("granit-site-widget Lit component", () => {
       const firstRequest = requestMock.mock.calls[0]?.[1] as Record<string, unknown>;
       const secondRequest = requestMock.mock.calls[1]?.[1] as Record<string, unknown>;
       expect(firstRequest.idempotency_key).toBe(secondRequest.idempotency_key);
+      expect(firstRequest.public_session_id).toBeUndefined();
+      expect(secondRequest.public_session_id).toBeUndefined();
       expect(JSON.stringify(firstRequest)).not.toMatch(/attachments|retry-private-name|blob:|image\/png/i);
       expectNoAttachmentRuntimeValues(firstRequest);
       expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(1);
@@ -689,6 +697,40 @@ describe("granit-site-widget Lit component", () => {
     } finally {
       imageEnvironment.restore();
     }
+  });
+
+  it("uses a backend-issued UUID only after the first accepted message", async () => {
+    const publicSessionId = "33333333-3333-4333-8333-333333333333";
+    const requestMock = vi.fn().mockResolvedValue({
+      status: "disabled",
+      publicSessionId,
+      systemText: "Менеджер ответит вручную.",
+      raw: {}
+    });
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "server-issued-session"
+    });
+    (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+    await widget.updateComplete;
+
+    expect(localStorage.getItem("sw:server-issued-session:public_session_id")).toBeNull();
+
+    widget.sendMessage("Первое сообщение");
+    await vi.waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(localStorage.getItem("sw:server-issued-session:public_session_id")).toBe(publicSessionId)
+    );
+
+    const firstRequest = requestMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(firstRequest.public_session_id).toBeUndefined();
+
+    widget.sendMessage("Второе сообщение");
+    await vi.waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+    const secondRequest = requestMock.mock.calls[1]?.[1] as Record<string, unknown>;
+    expect(secondRequest.public_session_id).toBe(publicSessionId);
   });
 
   it("does not resurrect a photo selection that was cleared while decoding", async () => {
@@ -941,7 +983,7 @@ describe("granit-site-widget Lit component", () => {
       [...(widget.shadowRoot?.querySelectorAll<HTMLElement>(".message__text, .marker__text") ?? [])].map(
         (element) => element.textContent?.trim() ?? ""
       );
-    expect(boundaryBSession).toMatch(/^sws_/);
+    expect(boundaryBSession).toBeNull();
     expect.soft(transcriptTexts()).not.toContain("Запрос экземпляра A");
 
     widget.shadowRoot?.querySelector<HTMLButtonElement>('.contact-trigger')?.click();
@@ -950,14 +992,14 @@ describe("granit-site-widget Lit component", () => {
 
     resolveOldResponse({
       status: "replied",
-      publicSessionId: "sws_stale_boundary_a",
+      publicSessionId: "44444444-4444-4444-8444-444444444444",
       replyText: "Старый ответ экземпляра A",
       raw: { mock: true }
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await widget.updateComplete;
 
-    expect(localStorage.getItem("sw:boundary-b:public_session_id")).toBe(boundaryBSession);
+    expect(localStorage.getItem("sw:boundary-b:public_session_id")).toBeNull();
     expect(transcriptTexts()).not.toContain("Старый ответ экземпляра A");
     expect(transcriptTexts()).not.toContain("Запрос экземпляра A");
   });
