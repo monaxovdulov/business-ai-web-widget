@@ -75,8 +75,8 @@ Primary host interface:
 
 ```html
 <script
-  async
-  src="https://cdn.example.com/site-widget/v1/loader.js"
+  defer
+  src="/vendor/granit/site-widget/v1.0.0/loader.js"
   data-widget-instance-id="memorial-main"
   data-api-base-url="https://ops.example.com"
   data-theme="memorial-soft">
@@ -86,7 +86,7 @@ Primary host interface:
 Explicit Web Component interface:
 
 ```html
-<script type="module" src="https://cdn.example.com/site-widget/v1/site-widget.esm.js"></script>
+<script type="module" src="/vendor/granit/site-widget/v1.0.0/site-widget.esm.js"></script>
 
 <granit-site-widget
   widget-instance-id="memorial-main"
@@ -98,7 +98,7 @@ Explicit Web Component interface:
 Programmatic interface:
 
 ```ts
-import { defineSiteWidget, mountSiteWidget } from "@granit/site-widget";
+import { defineSiteWidget, mountSiteWidget } from "@monaxovdulov/site-widget";
 
 defineSiteWidget();
 
@@ -447,7 +447,7 @@ Build package fields:
 
 ```json
 {
-  "name": "@granit/site-widget",
+  "name": "@monaxovdulov/site-widget",
   "type": "module",
   "exports": {
     ".": {

@@ -1,14 +1,18 @@
-# @granit/site-widget
+# @monaxovdulov/site-widget
 
 Production v1.0 public site widget. The public API is Web Components-first:
 `<granit-site-widget>`. Lit is bundled and used only as the internal UI layer.
 
-## CDN Loader
+## Runtime ZIP loader
+
+Copy the immutable `v<version>/` directory from the release ZIP into the
+landing repository. Serve `loader.js` and `site-widget.esm.js` together from
+the same origin as the page:
 
 ```html
 <script
-  async
-  src="https://cdn.example.com/site-widget/v1/loader.js"
+  defer
+  src="/vendor/granit/site-widget/v1.0.0/loader.js"
   data-widget-instance-id="memorial-main"
   data-api-base-url="https://ops.example.com"
   data-theme="memorial-soft"
@@ -16,13 +20,15 @@ Production v1.0 public site widget. The public API is Web Components-first:
 </script>
 ```
 
-The loader reads `data-*`, imports the sibling `/site-widget/v1/site-widget.esm.js`,
-and mounts the widget into `document.body`.
+The loader reads `data-*`, resolves the sibling `site-widget.esm.js` relative
+to its own `src`, and mounts the widget into `document.body`. Replace the
+example API origin only with an approved environment value. Production must
+not set mock or attachment-preview flags.
 
 ## Direct Web Component
 
 ```html
-<script type="module" src="https://cdn.example.com/site-widget/v1/site-widget.esm.js"></script>
+<script type="module" src="/vendor/granit/site-widget/v1.0.0/site-widget.esm.js"></script>
 
 <granit-site-widget
   widget-instance-id="memorial-main"
@@ -34,8 +40,20 @@ and mounts the widget into `document.body`.
 
 ## Programmatic
 
+Configure GitHub Packages authentication outside the repository, then install
+the private package:
+
+```bash
+npm install @monaxovdulov/site-widget@1.0.0
+```
+
+The registry mapping is tracked in `.npmrc`, but credentials are not. For
+local development, provide a token with `read:packages` through user-level npm
+configuration or an environment-backed secret. GitHub Actions publishing uses
+`GITHUB_TOKEN` only in the separately approved release workflow.
+
 ```ts
-import { defineSiteWidget, mountSiteWidget } from "@granit/site-widget";
+import { defineSiteWidget, mountSiteWidget } from "@monaxovdulov/site-widget";
 
 defineSiteWidget();
 
@@ -151,3 +169,17 @@ dist/site-widget.iife.js
 dist/site-widget.d.ts
 dist/design-tokens.json
 ```
+
+## Release validation
+
+After the full test gate, validate both delivery channels:
+
+```bash
+npm run verify:package
+npm run release:runtime
+npm run smoke:runtime
+```
+
+Generated reports, ZIP and checksum are written to the ignored
+`release-artifacts/` directory. See [RELEASE.md](./RELEASE.md) for the approval
+gates, immutable static-site layout and rollback procedure.
