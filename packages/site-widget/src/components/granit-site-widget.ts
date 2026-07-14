@@ -649,15 +649,38 @@ export class GranitSiteWidgetElement extends LitElement {
       const response = await this.sendMessageRequest(this.config, request, requestController.signal);
       if (!isCurrentRequest()) return;
 
-      if (response.publicSessionId) {
+      if (response.source === "server") {
+        if (this.publicSessionId && response.publicSessionId !== this.publicSessionId) {
+          throw new Error("Invalid site_widget.v1 response: public_session_id_mismatch");
+        }
         this.publicSessionId = response.publicSessionId;
         this.sessionStore?.setPublicSessionId(response.publicSessionId);
+        this.state = applyWidgetAction(
+          this.state,
+          {
+            type: "visitor.saved",
+            messageId,
+            publicMessageId: response.publicMessageId,
+            acceptanceStatus: response.acceptanceStatus
+          },
+          this.config
+        );
+      } else {
+        this.state = applyWidgetAction(this.state, { type: "visitor.mocked", messageId }, this.config);
       }
 
-      this.state = applyWidgetAction(this.state, { type: "visitor.persisted", text, messageId }, this.config);
-
-      if (response.status === "replied" && response.replyText) {
-        this.state = applyWidgetAction(this.state, { type: "assistant.replied", text: response.replyText }, this.config);
+      if (response.status === "replied") {
+        if (!response.replyText) throw new Error("Widget replied response is missing reply text");
+        this.state = applyWidgetAction(
+          this.state,
+          {
+            type: "assistant.replied",
+            text: response.replyText,
+            publicMessageId: response.source === "server" ? response.replyPublicMessageId : undefined,
+            disclosureText: response.source === "server" ? response.disclosureText : undefined
+          },
+          this.config
+        );
       } else {
         const status = response.status === "disabled" ? "disabled" : "fallback";
         this.state = applyWidgetAction(
@@ -667,13 +690,14 @@ export class GranitSiteWidgetElement extends LitElement {
         );
         emitSiteWidgetEvent(this, "fallback-shown", this.config, {
           status,
-          reason: response.reason ?? ""
+          reason: response.status === "fallback" && "reason" in response ? response.reason ?? "" : ""
         });
       }
 
       emitSiteWidgetEvent(this, "response-received", this.config, {
         status: response.status,
-        reason: response.reason ?? ""
+        acceptanceStatus: response.source === "server" ? response.acceptanceStatus : "mock",
+        reason: response.status === "fallback" && "reason" in response ? response.reason ?? "" : ""
       });
       this.requestUpdate();
     } catch (error) {

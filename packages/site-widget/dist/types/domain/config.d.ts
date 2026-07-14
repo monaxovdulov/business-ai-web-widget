@@ -1,9 +1,16 @@
 import type { MountSiteWidgetOptions, SiteWidgetAction, SiteWidgetConfig, SiteWidgetPanelSize, SiteWidgetQuickReply } from "../types/public";
 export declare const DEFAULT_QUICK_REPLIES: SiteWidgetQuickReply[];
 export declare const DEFAULT_MOBILE_ACTIONS: SiteWidgetAction[];
+export declare const SITE_WIDGET_BACKEND_PROVIDER_TIMEOUT_MS = 15000;
+export declare const SITE_WIDGET_NETWORK_PERSISTENCE_ALLOWANCE_MS = 5000;
+export declare const SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS: number;
+export declare const SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS: number;
+export declare const SITE_WIDGET_DEFAULT_BROWSER_TIMEOUT_MS = 25000;
+export declare function satisfiesSiteWidgetTimeoutInvariant(timeoutMs: number): boolean;
 export declare const DEFAULT_WIDGET_CONFIG: SiteWidgetConfig;
 export declare const OBSERVED_CONFIG_ATTRIBUTES: string[];
 export declare function normalizeWidgetConfig(input?: Partial<SiteWidgetConfig>): SiteWidgetConfig;
+export declare function normalizeSiteWidgetTimeoutMs(value: unknown): number;
 export declare function readConfigFromElement(element: Element): SiteWidgetConfig;
 export declare function applyOptionsToElement(element: HTMLElement, options?: MountSiteWidgetOptions): void;
 export declare function parseQuickReplies(value: string): SiteWidgetQuickReply[];

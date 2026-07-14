@@ -1,89 +1,148 @@
-import type { SiteWidgetConfig, SiteWidgetResponseViewModel } from "../types/public";
-import { normalizePublicSessionId } from "./public-session";
+import type {
+  SiteWidgetAcceptanceStatus,
+  SiteWidgetConfig,
+  SiteWidgetServerResponseViewModel
+} from "../types/public";
+import { normalizePublicUuid } from "./public-session";
 
-export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): SiteWidgetResponseViewModel {
-  const record = asRecord(body) ?? {};
-  const automation = asRecord(record.automation) ?? {};
-  const status = stringValue(automation.status);
-  const publicSessionId =
-    normalizePublicSessionId(record.public_session_id) ??
-    normalizePublicSessionId(asRecord(record.session)?.public_session_id) ??
-    normalizePublicSessionId(record.publicSessionId);
+const FALLBACK_REASONS = new Set([
+  "missing_openai_config",
+  "model_error",
+  "empty_model_response",
+  "unsafe_model_response",
+  "agent_reply_blocked",
+  "ai_persistence_unconfirmed"
+]);
 
-  if (status === "replied") {
-    const reply = asRecord(automation.reply) ?? asRecord(record.reply) ?? {};
-    const persisted = booleanish(reply.persisted) ?? booleanish(reply.is_persisted) ?? booleanish(automation.reply_persisted);
-    const replyText = stringValue(reply.text) ?? stringValue(reply.body) ?? stringValue(automation.persisted_text);
+const ROOT_KEYS = [
+  "ok",
+  "schema_version",
+  "status",
+  "public_session_id",
+  "public_message_id",
+  "action",
+  "automation",
+  "message_to_user"
+] as const;
+const REPLIED_AUTOMATION_KEYS = ["status", "next_step", "disclosure", "reply"] as const;
+const FALLBACK_AUTOMATION_KEYS = ["status", "next_step", "reason"] as const;
+const DISABLED_AUTOMATION_KEYS = ["status", "next_step"] as const;
+const DISCLOSURE_KEYS = ["shown", "version", "text"] as const;
+const REPLY_KEYS = ["public_message_id", "sender_role", "text"] as const;
 
-    if (replyText && persisted !== false) {
-      return {
-        status: "replied",
-        publicSessionId,
-        replyText,
-        reason: stringValue(automation.reason),
-        raw: body
-      };
-    }
+export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): SiteWidgetServerResponseViewModel {
+  const record = requireRecord(body, "root");
+  requireExactKeys(record, ROOT_KEYS, "root");
+  if (record.ok !== true) protocolError("ok");
+  if (record.schema_version !== "site_widget.v1") protocolError("schema_version");
 
-    return {
-      status: "fallback",
-      publicSessionId,
-      systemText: safeSystemMessage(automation, config.fallbackMessage),
-      reason: stringValue(automation.reason),
-      raw: body
-    };
-  }
+  const acceptanceStatus = requireAcceptanceStatus(record.status);
+  if (record.action !== "show_widget_saved") protocolError("action");
 
-  if (status === "disabled") {
-    return {
-      status: "disabled",
-      publicSessionId,
-      systemText: safeSystemMessage(automation, config.disabledMessage),
-      reason: stringValue(automation.reason),
-      raw: body
-    };
-  }
-
-  if (status === "fallback") {
-    return {
-      status: "fallback",
-      publicSessionId,
-      systemText: safeSystemMessage(automation, config.fallbackMessage),
-      reason: stringValue(automation.reason),
-      raw: body
-    };
-  }
-
-  return {
-    status: "fallback",
+  const publicSessionId = requireUuid(record.public_session_id, "public_session_id");
+  const publicMessageId = requireUuid(record.public_message_id, "public_message_id");
+  const messageToUser = requireString(record.message_to_user, "message_to_user");
+  const automation = requireRecord(record.automation, "automation");
+  const automationStatus = requireString(automation.status, "automation.status");
+  const base = {
+    source: "server" as const,
+    acceptanceStatus,
+    action: "show_widget_saved" as const,
     publicSessionId,
-    systemText: config.fallbackMessage,
+    publicMessageId,
     raw: body
   };
+
+  if (automationStatus === "replied") {
+    requireExactKeys(automation, REPLIED_AUTOMATION_KEYS, "automation");
+    if (automation.next_step !== "ai_reply_shown") protocolError("automation.next_step");
+    const disclosure = requireRecord(automation.disclosure, "automation.disclosure");
+    requireExactKeys(disclosure, DISCLOSURE_KEYS, "automation.disclosure");
+    if (disclosure.shown !== true) protocolError("automation.disclosure.shown");
+    requireBoundedString(disclosure.version, "automation.disclosure.version", 120);
+    const disclosureText = requireBoundedString(disclosure.text, "automation.disclosure.text", 1_000);
+
+    const reply = requireRecord(automation.reply, "automation.reply");
+    requireExactKeys(reply, REPLY_KEYS, "automation.reply");
+    const replyPublicMessageId = requireUuid(reply.public_message_id, "automation.reply.public_message_id");
+    if (replyPublicMessageId === publicMessageId) protocolError("automation.reply.public_message_id_identity");
+    if (reply.sender_role !== "ai_assistant") protocolError("automation.reply.sender_role");
+    const replyText = requireBoundedString(reply.text, "automation.reply.text", 1_000);
+
+    return {
+      ...base,
+      status: "replied",
+      replyText,
+      replyPublicMessageId,
+      disclosureText
+    };
+  }
+
+  if (automationStatus === "fallback") {
+    requireExactKeys(automation, FALLBACK_AUTOMATION_KEYS, "automation");
+    if (automation.next_step !== "manager_review") protocolError("automation.next_step");
+    const reason = requireString(automation.reason, "automation.reason");
+    if (!FALLBACK_REASONS.has(reason)) protocolError("automation.reason");
+    return {
+      ...base,
+      status: "fallback",
+      systemText: messageToUser.trim() || config.fallbackMessage,
+      reason
+    };
+  }
+
+  if (automationStatus === "disabled") {
+    requireExactKeys(automation, DISABLED_AUTOMATION_KEYS, "automation");
+    if (automation.next_step !== "manager_review") protocolError("automation.next_step");
+    return {
+      ...base,
+      status: "disabled",
+      systemText: messageToUser.trim() || config.disabledMessage
+    };
+  }
+
+  protocolError("automation.status");
 }
 
-function safeSystemMessage(automation: Record<string, unknown>, fallback: string): string {
-  return stringValue(automation.message) ?? stringValue(automation.display_message) ?? fallback;
+function requireAcceptanceStatus(value: unknown): SiteWidgetAcceptanceStatus {
+  if (value === "accepted" || value === "replayed") return value;
+  return protocolError("status");
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+function requireUuid(value: unknown, field: string): string {
+  return normalizePublicUuid(value) ?? protocolError(field);
+}
+
+function requireRecord(value: unknown, field: string): Record<string, unknown> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
-  return undefined;
+  return protocolError(field);
 }
 
-function stringValue(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
+function requireExactKeys(record: Record<string, unknown>, allowedKeys: readonly string[], field: string): void {
+  const allowed = new Set(allowedKeys);
+  const unexpected = Object.keys(record).find((key) => !allowed.has(key));
+  if (unexpected) protocolError(`${field}.${unexpected}`);
 }
 
-function booleanish(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") return value;
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
-  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
-  return undefined;
+function requireString(value: unknown, field: string): string {
+  if (typeof value === "string") return value;
+  return protocolError(field);
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  const string = requireString(value, field).trim();
+  return string || protocolError(field);
+}
+
+function requireBoundedString(value: unknown, field: string, maxLength: number): string {
+  const raw = requireString(value, field);
+  if (raw.length > maxLength) protocolError(field);
+  const normalized = raw.trim();
+  return normalized || protocolError(field);
+}
+
+function protocolError(field: string): never {
+  throw new Error(`Invalid site_widget.v1 response: ${field}`);
 }

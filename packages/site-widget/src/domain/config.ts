@@ -22,10 +22,24 @@ export const DEFAULT_MOBILE_ACTIONS: SiteWidgetAction[] = [
   { type: "prefill", label: "Расчет", text: "Нужен расчет памятника", icon: "calculator" }
 ];
 
+export const SITE_WIDGET_BACKEND_PROVIDER_TIMEOUT_MS = 15_000;
+export const SITE_WIDGET_NETWORK_PERSISTENCE_ALLOWANCE_MS = 5_000;
+export const SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS =
+  SITE_WIDGET_BACKEND_PROVIDER_TIMEOUT_MS + SITE_WIDGET_NETWORK_PERSISTENCE_ALLOWANCE_MS;
+export const SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS = SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS + 1;
+export const SITE_WIDGET_DEFAULT_BROWSER_TIMEOUT_MS = 25_000;
+
+export function satisfiesSiteWidgetTimeoutInvariant(timeoutMs: number): boolean {
+  return (
+    Number.isInteger(timeoutMs) &&
+    timeoutMs > SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS
+  );
+}
+
 export const DEFAULT_WIDGET_CONFIG: SiteWidgetConfig = {
   apiBaseUrl: "",
   messagesPath: "/public/intake/site-widget/messages",
-  timeoutMs: 15000,
+  timeoutMs: SITE_WIDGET_DEFAULT_BROWSER_TIMEOUT_MS,
   widgetInstanceId: "default",
   theme: "memorial-soft",
   position: "bottom-right",
@@ -139,7 +153,7 @@ const NUMBER_KEYS = new Set<keyof SiteWidgetConfig>(["timeoutMs", "maxMessageLen
 
 export function normalizeWidgetConfig(input: Partial<SiteWidgetConfig> = {}): SiteWidgetConfig {
   const raw = { ...DEFAULT_WIDGET_CONFIG, ...input };
-  const timeoutMs = toPositiveInteger(raw.timeoutMs, DEFAULT_WIDGET_CONFIG.timeoutMs, 60000);
+  const timeoutMs = normalizeSiteWidgetTimeoutMs(raw.timeoutMs);
   const maxMessageLength = toPositiveInteger(raw.maxMessageLength, DEFAULT_WIDGET_CONFIG.maxMessageLength, 10000);
 
   return {
@@ -168,6 +182,11 @@ export function normalizeWidgetConfig(input: Partial<SiteWidgetConfig> = {}): Si
     quickReplies: normalizeQuickReplies(raw.quickReplies),
     mobileActions: normalizeActions(raw.mobileActions, raw.phoneHref)
   };
+}
+
+export function normalizeSiteWidgetTimeoutMs(value: unknown): number {
+  const requestedTimeoutMs = toPositiveInteger(value, DEFAULT_WIDGET_CONFIG.timeoutMs, 60_000);
+  return Math.max(requestedTimeoutMs, SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS);
 }
 
 export function readConfigFromElement(element: Element): SiteWidgetConfig {

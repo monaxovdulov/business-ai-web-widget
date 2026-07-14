@@ -1,4 +1,6 @@
+import { normalizeSiteWidgetTimeoutMs } from "../domain/config";
 import { mapSiteWidgetResponse } from "../domain/response";
+import { normalizePublicSessionId } from "../domain/public-session";
 import type { SiteWidgetConfig, SiteWidgetMessageRequest, SiteWidgetResponseViewModel } from "../types/public";
 
 export async function sendSiteWidgetMessage(
@@ -11,7 +13,7 @@ export async function sendSiteWidgetMessage(
   if (!config.apiBaseUrl) throw new Error("apiBaseUrl is required when mock=false");
 
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), config.timeoutMs);
+  const timeout = globalThis.setTimeout(() => controller.abort(), normalizeSiteWidgetTimeoutMs(config.timeoutMs));
   const abortForwarder = () => controller.abort();
   if (signal?.aborted) controller.abort();
   else signal?.addEventListener("abort", abortForwarder, { once: true });
@@ -34,8 +36,9 @@ export async function sendSiteWidgetMessage(
     }
 
     const mapped = mapSiteWidgetResponse(body, config);
-    if (!mapped.publicSessionId) {
-      throw new Error("Widget response is missing a valid public_session_id");
+    const requestedPublicSessionId = normalizePublicSessionId(request.public_session_id);
+    if (requestedPublicSessionId && mapped.publicSessionId !== requestedPublicSessionId) {
+      throw new Error("Invalid site_widget.v1 response: public_session_id_mismatch");
     }
     return mapped;
   } finally {
@@ -54,6 +57,7 @@ export async function mockSiteWidgetMessage(
 
   if (text.includes("менеджер") || text.includes("позвон")) {
     return {
+      source: "mock",
       status: "fallback",
       publicSessionId: request.public_session_id,
       systemText: "Передали менеджеру. Он свяжется с вами по указанным контактам или ответит здесь.",
@@ -64,6 +68,7 @@ export async function mockSiteWidgetMessage(
 
   if (text.includes("сто") || text.includes("цен") || text.includes("расчет") || text.includes("расчёт")) {
     return {
+      source: "mock",
       status: "replied",
       publicSessionId: request.public_session_id,
       replyText:
@@ -73,6 +78,7 @@ export async function mockSiteWidgetMessage(
   }
 
   return {
+    source: "mock",
     status: "replied",
     publicSessionId: request.public_session_id,
     replyText:

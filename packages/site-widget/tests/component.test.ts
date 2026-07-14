@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { defineSiteWidget, mountSiteWidget } from "../src";
 import type { GranitSiteWidgetElement } from "../src/components/granit-site-widget";
+import {
+  disabledReceipt,
+  fallbackReceipt,
+  repliedReceipt,
+  TEST_REPLY_MESSAGE_ID,
+  TEST_VISITOR_MESSAGE_ID
+} from "./helpers/response-fixtures";
 
 const BACKEND_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000";
 
@@ -83,10 +90,11 @@ describe("granit-site-widget Lit component", () => {
   });
 
   it("reflects pending work through aria-busy and an atomic status", async () => {
-    let resolveRequest: (value: { status: "replied"; replyText: string; raw: unknown }) => void = () => undefined;
+    let resolveRequest: (value: { source: "mock"; status: "replied"; replyText: string; raw: unknown }) => void =
+      () => undefined;
     const requestMock = vi.fn(
       () =>
-        new Promise<{ status: "replied"; replyText: string; raw: unknown }>((resolve) => {
+        new Promise<{ source: "mock"; status: "replied"; replyText: string; raw: unknown }>((resolve) => {
           resolveRequest = resolve;
         })
     );
@@ -100,7 +108,7 @@ describe("granit-site-widget Lit component", () => {
       expect(widget.shadowRoot?.querySelector('[aria-atomic="true"]')?.textContent).toContain("Отправляем сообщение");
     });
 
-    resolveRequest({ status: "replied", replyText: "Готово", raw: {} });
+    resolveRequest({ source: "mock", status: "replied", replyText: "Готово", raw: {} });
     await vi.waitFor(() => {
       expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("false");
     });
@@ -159,13 +167,12 @@ describe("granit-site-widget Lit component", () => {
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
-        JSON.stringify({
-          public_session_id: BACKEND_SESSION_ID,
-          automation: {
-            status: "replied",
-            reply: { text: "<img src=x onerror=alert(1)>safe" }
-          }
-        }),
+        JSON.stringify(
+          repliedReceipt({
+            publicSessionId: BACKEND_SESSION_ID,
+            replyText: "<img src=x onerror=alert(1)>safe"
+          })
+        ),
         { status: 200, headers: { "content-type": "application/json" } }
       )
     );
@@ -180,6 +187,36 @@ describe("granit-site-widget Lit component", () => {
     const messages = widget.shadowRoot?.querySelector(".messages");
     expect(messages?.innerHTML).toContain("&lt;img");
     expect(messages?.querySelector("img")).toBeNull();
+  });
+
+  it("keeps the visitor retryable and hides AI text when the save receipt is invalid", async () => {
+    const invalidReceipt = {
+      ...repliedReceipt({ publicSessionId: BACKEND_SESSION_ID, replyText: "Нельзя показывать" }),
+      action: "unknown_action"
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(invalidReceipt), {
+        status: 202,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "invalid-save-receipt"
+    });
+    await widget.updateComplete;
+
+    widget.sendMessage("Проверка receipt");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('.message-root--visitor')?.getAttribute("data-message-status")).toBe(
+        "error"
+      );
+    });
+
+    expect(widget.shadowRoot?.textContent).not.toContain("Нельзя показывать");
+    expect(widget.shadowRoot?.querySelector('[part~="retry-button"]')).toBeTruthy();
   });
 
   it("renders assistant and visitor messages through additive message primitives", async () => {
@@ -213,8 +250,12 @@ describe("granit-site-widget Lit component", () => {
       apiBaseUrl: "https://ops.example.com",
       widgetInstanceId: `marker-${status}`
     });
+    const body =
+      status === "fallback"
+        ? fallbackReceipt({ publicSessionId: BACKEND_SESSION_ID })
+        : disabledReceipt({ publicSessionId: BACKEND_SESSION_ID });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ public_session_id: BACKEND_SESSION_ID, automation: { status } }), {
+      new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" }
       })
@@ -243,10 +284,13 @@ describe("granit-site-widget Lit component", () => {
       requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       if (requests.length === 1) throw new Error("offline");
       return new Response(
-        JSON.stringify({
-          public_session_id: BACKEND_SESSION_ID,
-          automation: { status: "replied", reply: { text: "Принято", persisted: true } }
-        }),
+        JSON.stringify(
+          repliedReceipt({
+            acceptanceStatus: "replayed",
+            publicSessionId: BACKEND_SESSION_ID,
+            replyText: "Принято"
+          })
+        ),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     });
@@ -275,6 +319,12 @@ describe("granit-site-widget Lit component", () => {
 
     expect(widget.shadowRoot?.querySelectorAll('.message-root--visitor')).toHaveLength(1);
     expect(requests[0]?.idempotency_key).toBe(requests[1]?.idempotency_key);
+    expect(widget.shadowRoot?.querySelector('.message-root--visitor')?.getAttribute("data-message-status")).toBe(
+      "saved"
+    );
+    expect(widget.shadowRoot?.querySelector('.message-root--visitor')?.getAttribute("data-acceptance-status")).toBe(
+      "replayed"
+    );
   });
 
   it("announces the configured transport error in an atomic live region", async () => {
@@ -655,6 +705,7 @@ describe("granit-site-widget Lit component", () => {
         .fn()
         .mockRejectedValueOnce(new Error("offline"))
         .mockResolvedValueOnce({
+          source: "mock",
           status: "replied",
           replyText: "Фото осталось в сообщении",
           raw: { mock: true }
@@ -702,8 +753,12 @@ describe("granit-site-widget Lit component", () => {
   it("uses a backend-issued UUID only after the first accepted message", async () => {
     const publicSessionId = "33333333-3333-4333-8333-333333333333";
     const requestMock = vi.fn().mockResolvedValue({
+      source: "server",
+      acceptanceStatus: "accepted",
+      action: "show_widget_saved",
       status: "disabled",
       publicSessionId,
+      publicMessageId: TEST_VISITOR_MESSAGE_ID,
       systemText: "Менеджер ответит вручную.",
       raw: {}
     });
@@ -731,6 +786,43 @@ describe("granit-site-widget Lit component", () => {
     await vi.waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
     const secondRequest = requestMock.mock.calls[1]?.[1] as Record<string, unknown>;
     expect(secondRequest.public_session_id).toBe(publicSessionId);
+  });
+
+  it("never overwrites an established public session with a mismatched response UUID", async () => {
+    const widgetInstanceId = "server-session-mismatch";
+    const establishedSessionId = "55555555-5555-4555-8555-555555555555";
+    const replacementSessionId = "66666666-6666-4666-8666-666666666666";
+    localStorage.setItem(`sw:${widgetInstanceId}:public_session_id`, establishedSessionId);
+    const requestMock = vi.fn().mockResolvedValue({
+      source: "server",
+      acceptanceStatus: "accepted",
+      action: "show_widget_saved",
+      status: "disabled",
+      publicSessionId: replacementSessionId,
+      publicMessageId: TEST_VISITOR_MESSAGE_ID,
+      systemText: "Этот marker не должен появиться.",
+      raw: {}
+    });
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId
+    });
+    (widget as unknown as { sendMessageRequest: typeof requestMock }).sendMessageRequest = requestMock;
+    await widget.updateComplete;
+
+    widget.sendMessage("Продолжение диалога");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('.message-root--visitor')?.getAttribute("data-message-status")).toBe(
+        "error"
+      );
+    });
+
+    expect(localStorage.getItem(`sw:${widgetInstanceId}:public_session_id`)).toBe(establishedSessionId);
+    expect(widget.shadowRoot?.textContent).not.toContain("Этот marker не должен появиться.");
+    const request = requestMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(request.public_session_id).toBe(establishedSessionId);
   });
 
   it("does not resurrect a photo selection that was cleared while decoding", async () => {
@@ -786,6 +878,7 @@ describe("granit-site-widget Lit component", () => {
         widgetInstanceId: "photo-submit-during-decode"
       });
       const requestMock = vi.fn().mockResolvedValue({
+        source: "mock",
         status: "replied",
         replyText: "Готово",
         raw: { mock: true }
@@ -907,6 +1000,7 @@ describe("granit-site-widget Lit component", () => {
         widgetInstanceId: "photo-submit-clear-boundary"
       });
       const requestMock = vi.fn().mockResolvedValue({
+        source: "mock",
         status: "replied",
         replyText: "Не должно отправиться",
         raw: { mock: true }
@@ -944,9 +1038,15 @@ describe("granit-site-widget Lit component", () => {
 
   it("establishes a fresh runtime and storage boundary when widget-instance-id changes", async () => {
     type DeferredResponse = {
+      source: "server";
+      acceptanceStatus: "accepted";
+      action: "show_widget_saved";
       status: "replied";
       publicSessionId: string;
+      publicMessageId: string;
       replyText: string;
+      replyPublicMessageId: string;
+      disclosureText: string;
       raw: Record<string, unknown>;
     };
     let resolveOldResponse: (response: DeferredResponse) => void = () => undefined;
@@ -991,10 +1091,16 @@ describe("granit-site-widget Lit component", () => {
     expect.soft(widget.shadowRoot?.querySelector<HTMLInputElement>('.phone-field')?.value).toBe("");
 
     resolveOldResponse({
+      source: "server",
+      acceptanceStatus: "accepted",
+      action: "show_widget_saved",
       status: "replied",
       publicSessionId: "44444444-4444-4444-8444-444444444444",
+      publicMessageId: TEST_VISITOR_MESSAGE_ID,
       replyText: "Старый ответ экземпляра A",
-      raw: { mock: true }
+      replyPublicMessageId: TEST_REPLY_MESSAGE_ID,
+      disclosureText: "Автоответ.",
+      raw: {}
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await widget.updateComplete;

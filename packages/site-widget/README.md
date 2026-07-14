@@ -82,10 +82,21 @@ POST /public/intake/site-widget/messages
 with `schema_version: "site_widget.v1"` and
 `event_type: "site_widget.message_submitted"`.
 
-The browser renders AI text only when the response has
-`automation.status="replied"` and a persisted reply text. `fallback`,
-`disabled`, unknown statuses, and `replied` without text render a safe
+The browser marks the visitor bubble as saved only after a successful response
+strictly confirms `schema_version="site_widget.v1"`, root
+`status="accepted"|"replayed"`, `action="show_widget_saved"`, a valid public
+session UUID and a valid visitor public message UUID. It renders AI text only
+when the same receipt has `automation.status="replied"`, a distinct persisted
+reply UUID, `sender_role="ai_assistant"`, disclosure and non-empty reply text.
+Protocol mismatches keep the original visitor bubble retryable and never render
+the unconfirmed AI text. `fallback` and `disabled` use the contract-compatible
 manager-review marker.
+
+The consumer integration budget fixes the total server deadline at 20 seconds:
+15 seconds for the provider plus a bounded 5-second network/persistence
+allowance. The default browser deadline is 25 seconds, configuration is
+normalized to at least 20,001 ms, and the fetch is actually aborted when that
+browser deadline expires.
 
 `site_widget.v1` is strict text-only JSON. Production never renders a photo
 picker and never adds attachments, filenames, MIME values, `blob:` URLs, or

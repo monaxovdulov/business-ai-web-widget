@@ -72,16 +72,40 @@ export type SiteWidgetMessageRequest = {
     } | undefined;
 };
 export type WidgetAutomationStatus = "replied" | "fallback" | "disabled";
-export type SiteWidgetResponseViewModel = {
-    status: WidgetAutomationStatus | "error";
+export type SiteWidgetAcceptanceStatus = "accepted" | "replayed";
+type SiteWidgetServerResponseBase = {
+    source: "server";
+    acceptanceStatus: SiteWidgetAcceptanceStatus;
+    action: "show_widget_saved";
+    publicSessionId: string;
+    publicMessageId: string;
+    raw: unknown;
+};
+export type SiteWidgetServerResponseViewModel = (SiteWidgetServerResponseBase & {
+    status: "replied";
+    replyText: string;
+    replyPublicMessageId: string;
+    disclosureText: string;
+}) | (SiteWidgetServerResponseBase & {
+    status: "fallback";
+    systemText: string;
+    reason: string;
+}) | (SiteWidgetServerResponseBase & {
+    status: "disabled";
+    systemText: string;
+});
+export type SiteWidgetMockResponseViewModel = {
+    source: "mock";
+    status: WidgetAutomationStatus;
     publicSessionId?: string | undefined;
     replyText?: string | undefined;
     systemText?: string | undefined;
     reason?: string | undefined;
     raw: unknown;
 };
+export type SiteWidgetResponseViewModel = SiteWidgetServerResponseViewModel | SiteWidgetMockResponseViewModel;
 export type WidgetMessageRole = "assistant" | "visitor" | "system";
-export type WidgetMessageStatus = "pending" | "sent" | "error";
+export type WidgetMessageStatus = "pending" | "saved" | "sent" | "error";
 export type WidgetSystemKind = "fallback" | "disabled";
 export type WidgetMessage = {
     id: string;
@@ -89,7 +113,10 @@ export type WidgetMessage = {
     text: string;
     createdAt: string;
     status: WidgetMessageStatus;
+    publicMessageId?: string | undefined;
+    acceptanceStatus?: SiteWidgetAcceptanceStatus | undefined;
     disclosure?: boolean | undefined;
+    disclosureText?: string | undefined;
     systemKind?: WidgetSystemKind | undefined;
 };
 export type SiteWidgetEventName = "ready" | "opened" | "closed" | "message-submitted" | "response-received" | "fallback-shown" | "error" | "action-clicked" | "phone-saved";
@@ -148,4 +175,5 @@ export type GranitSiteWidgetGlobal = {
     mount: (options?: MountSiteWidgetOptions) => HTMLElement;
     tagName: string;
 };
+export {};
 //# sourceMappingURL=public.d.ts.map

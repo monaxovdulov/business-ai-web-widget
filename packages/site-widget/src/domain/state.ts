@@ -1,4 +1,10 @@
-import type { SiteWidgetConfig, WidgetMessage, WidgetMessageStatus, WidgetSystemKind } from "../types/public";
+import type {
+  SiteWidgetAcceptanceStatus,
+  SiteWidgetConfig,
+  WidgetMessage,
+  WidgetMessageStatus,
+  WidgetSystemKind
+} from "../types/public";
 import { createClientId } from "./ids";
 
 export type WidgetStatus =
@@ -39,8 +45,19 @@ export type WidgetAction =
   | { type: "contact.phone.saved"; phone: string }
   | { type: "submit.started"; text: string; idempotencyKey: string }
   | { type: "retry.started" }
-  | { type: "visitor.persisted"; text: string; messageId?: string }
-  | { type: "assistant.replied"; text: string }
+  | {
+      type: "visitor.saved";
+      messageId: string;
+      publicMessageId: string;
+      acceptanceStatus: SiteWidgetAcceptanceStatus;
+    }
+  | { type: "visitor.mocked"; messageId: string }
+  | {
+      type: "assistant.replied";
+      text: string;
+      publicMessageId?: string | undefined;
+      disclosureText?: string | undefined;
+    }
   | { type: "system.message"; text: string; status: "fallback" | "disabled" }
   | { type: "submit.failed"; text: string; messageId?: string }
   | { type: "session.cleared" };
@@ -146,15 +163,30 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
       };
     }
 
-    case "visitor.persisted": {
+    case "visitor.saved": {
       if (!current.pending) return current;
-      if (action.messageId && action.messageId !== current.pending.messageId) return current;
+      if (action.messageId !== current.pending.messageId) return current;
       return {
         ...current,
         messages: current.messages.map((message) =>
           message.id === current.pending?.messageId
-            ? { ...message, status: "sent" as const }
+            ? {
+                ...message,
+                status: "saved" as const,
+                publicMessageId: action.publicMessageId,
+                acceptanceStatus: action.acceptanceStatus
+              }
             : message
+        )
+      };
+    }
+
+    case "visitor.mocked": {
+      if (!current.pending || action.messageId !== current.pending.messageId) return current;
+      return {
+        ...current,
+        messages: current.messages.map((message) =>
+          message.id === current.pending?.messageId ? { ...message, status: "sent" as const } : message
         )
       };
     }
@@ -162,7 +194,16 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
     case "assistant.replied": {
       const text = String(action.text ?? "").trim();
       const messages = text
-        ? [...current.messages, createWidgetMessage({ role: "assistant", text, disclosure: true })]
+        ? [
+            ...current.messages,
+            createWidgetMessage({
+              role: "assistant",
+              text,
+              disclosure: true,
+              publicMessageId: action.publicMessageId,
+              disclosureText: action.disclosureText
+            })
+          ]
         : current.messages;
       return finishSubmit(current, messages, "replied");
     }
@@ -209,6 +250,9 @@ export function createWidgetMessage({
   text,
   status = "sent",
   disclosure = false,
+  publicMessageId,
+  acceptanceStatus,
+  disclosureText,
   systemKind,
   createdAt = new Date().toISOString()
 }: {
@@ -216,6 +260,9 @@ export function createWidgetMessage({
   text: string;
   status?: WidgetMessageStatus;
   disclosure?: boolean;
+  publicMessageId?: string | undefined;
+  acceptanceStatus?: SiteWidgetAcceptanceStatus;
+  disclosureText?: string | undefined;
   systemKind?: WidgetSystemKind;
   createdAt?: string;
 }): WidgetMessage {
@@ -224,7 +271,10 @@ export function createWidgetMessage({
     role,
     text: String(text ?? ""),
     status,
+    publicMessageId,
+    acceptanceStatus,
     disclosure,
+    disclosureText,
     systemKind,
     createdAt
   };

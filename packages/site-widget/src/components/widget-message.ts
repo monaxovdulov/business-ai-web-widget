@@ -18,6 +18,9 @@ export function renderMessageRoot(message: WidgetMessage, context: WidgetMessage
     class=${`message-root message-root--${message.role}`}
     part="message-root"
     data-message-id=${message.id}
+    data-message-status=${message.status}
+    data-public-message-id=${message.publicMessageId ?? nothing}
+    data-acceptance-status=${message.acceptanceStatus ?? nothing}
   >
     ${renderMessageBubble(message, context)} ${renderMessageMeta(message, context)}
   </div>`;
@@ -34,14 +37,14 @@ export function renderMessageMeta(
   message: WidgetMessage,
   context: WidgetMessageRenderContext
 ): TemplateResult | typeof nothing {
-  const hasStatus = message.status === "pending" || message.status === "error";
+  const hasStatus = message.status === "pending" || message.status === "saved" || message.status === "error";
   if (!message.disclosure && !hasStatus) return nothing;
 
   return html`<div class="message-meta" part="message-meta">
     ${message.disclosure
       ? html`<div class="message-disclosure" part="message-disclosure">
           ${widgetIcon("spark", 16)}
-          <span>${context.config.disclosureText}</span>
+          <span>${message.disclosureText ?? context.config.disclosureText}</span>
         </div>`
       : nothing}
     ${hasStatus
@@ -50,7 +53,9 @@ export function renderMessageMeta(
             ${message.status === "pending"
               ? html`<span class="message-status__spinner" aria-hidden="true">${widgetIcon("loader", 14)}</span
                   >Отправляем…`
-              : "Не отправлено"}
+              : message.status === "saved"
+                ? "Сохранено"
+                : "Не отправлено"}
           </span>
           ${renderMessageActions(message, context)}
         </div>`

@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { normalizeWidgetConfig, parseQuickReplies, readConfigFromElement } from "../src/domain/config";
+import {
+  DEFAULT_WIDGET_CONFIG,
+  normalizeWidgetConfig,
+  parseQuickReplies,
+  readConfigFromElement,
+  satisfiesSiteWidgetTimeoutInvariant,
+  SITE_WIDGET_BACKEND_PROVIDER_TIMEOUT_MS,
+  SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS,
+  SITE_WIDGET_NETWORK_PERSISTENCE_ALLOWANCE_MS,
+  SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS
+} from "../src/domain/config";
 import { createIdempotencyKey } from "../src/domain/ids";
 import { normalizePublicSessionId } from "../src/domain/public-session";
 import { buildSiteWidgetMessageRequest } from "../src/domain/request";
@@ -9,6 +19,13 @@ import { buildWidgetViewModel } from "../src/domain/view-model";
 import { emitSiteWidgetEvent } from "../src/events/widget-events";
 import { sendSiteWidgetMessage } from "../src/services/intake-client";
 import { createSessionStore } from "../src/services/session-store";
+import {
+  disabledReceipt,
+  fallbackReceipt,
+  repliedReceipt,
+  TEST_REPLY_MESSAGE_ID,
+  TEST_VISITOR_MESSAGE_ID
+} from "./helpers/response-fixtures";
 
 const firstSessionId = "11111111-1111-4111-8111-111111111111";
 const secondSessionId = "22222222-2222-4222-8222-222222222222";
@@ -31,6 +48,69 @@ describe("site widget domain", () => {
       { label: "Нужен расчет", text: "Нужен расчет" },
       { label: "Есть вопрос", text: "Есть вопрос" }
     ]);
+  });
+
+  it("keeps the browser timeout strictly above the backend/provider budget and bounded allowance", () => {
+    expect(DEFAULT_WIDGET_CONFIG.timeoutMs).toBe(25_000);
+    expect(satisfiesSiteWidgetTimeoutInvariant(DEFAULT_WIDGET_CONFIG.timeoutMs)).toBe(true);
+    expect(SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS).toBe(
+      SITE_WIDGET_BACKEND_PROVIDER_TIMEOUT_MS + SITE_WIDGET_NETWORK_PERSISTENCE_ALLOWANCE_MS + 1
+    );
+    expect(SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS).toBe(20_000);
+    expect(normalizeWidgetConfig({ timeoutMs: 15_000 }).timeoutMs).toBe(SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS);
+    expect(normalizeWidgetConfig({ timeoutMs: 20_000 }).timeoutMs).toBe(SITE_WIDGET_MIN_BROWSER_TIMEOUT_MS);
+    expect(normalizeWidgetConfig({ timeoutMs: 20_500 }).timeoutMs).toBe(20_500);
+  });
+
+  it("aborts the actual fetch after the browser deadline, not inside the fixed server budget", async () => {
+    vi.useFakeTimers();
+    const config = {
+      ...normalizeWidgetConfig({ apiBaseUrl: "https://ops.example.com" }),
+      timeoutMs: 15_000
+    };
+    const request = buildSiteWidgetMessageRequest({
+      config,
+      text: "Проверка deadline",
+      idempotencyKey: "idem_deadline_abort",
+      environment: {
+        href: "https://example.com/",
+        search: "",
+        title: "Landing",
+        referrer: "",
+        locale: "ru-RU",
+        timezone: "Europe/Moscow",
+        now: "2026-07-14T00:00:00.000Z"
+      }
+    });
+    let fetchSignal: AbortSignal | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          if (!init?.signal) throw new Error("Expected fetch AbortSignal");
+          fetchSignal = init.signal;
+          init.signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true }
+          );
+        })
+    );
+
+    try {
+      const sendPromise = sendSiteWidgetMessage(config, request);
+      const rejection = expect(sendPromise).rejects.toMatchObject({ name: "AbortError" });
+      expect(fetchSignal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(SITE_WIDGET_TOTAL_SERVER_DEADLINE_MS);
+      expect(fetchSignal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await rejection;
+      expect(fetchSignal?.aborted).toBe(true);
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("builds the v1 public intake request with UTM and no empty fields", () => {
@@ -84,39 +164,91 @@ describe("site widget domain", () => {
     expect(request.public_session_id).toBeUndefined();
   });
 
-  it("maps backend responses through the display gate", () => {
+  it("maps accepted and replayed receipts only after strict response truth checks", () => {
     const config = normalizeWidgetConfig();
 
-    expect(
-      mapSiteWidgetResponse({ automation: { status: "replied", reply: { text: "Готово" } } }, config)
-    ).toMatchObject({ status: "replied", replyText: "Готово" });
-
-    expect(mapSiteWidgetResponse({ automation: { status: "replied", reply: {} } }, config)).toMatchObject({
-      status: "fallback",
-      systemText: config.fallbackMessage
+    expect(mapSiteWidgetResponse(repliedReceipt({ replyText: "Готово" }), config)).toMatchObject({
+      source: "server",
+      acceptanceStatus: "accepted",
+      action: "show_widget_saved",
+      publicMessageId: TEST_VISITOR_MESSAGE_ID,
+      status: "replied",
+      replyPublicMessageId: TEST_REPLY_MESSAGE_ID,
+      replyText: "Готово"
     });
-
     expect(
-      mapSiteWidgetResponse({ automation: { status: "fallback", reply: { text: "AI draft" } } }, config)
-    ).toMatchObject({ status: "fallback", systemText: config.fallbackMessage });
+      mapSiteWidgetResponse(
+        repliedReceipt({ acceptanceStatus: "replayed", replyText: "Тот же сохранённый ответ" }),
+        config
+      )
+    ).toMatchObject({
+      acceptanceStatus: "replayed",
+      status: "replied",
+      replyText: "Тот же сохранённый ответ"
+    });
+    expect(mapSiteWidgetResponse(fallbackReceipt({ messageToUser: "Менеджер проверит детали" }), config)).toMatchObject(
+      {
+        status: "fallback",
+        systemText: "Менеджер проверит детали",
+        reason: "model_error"
+      }
+    );
+    expect(mapSiteWidgetResponse(disabledReceipt(), config)).toMatchObject({ status: "disabled" });
+  });
+
+  it("rejects responses that cannot prove root truth or persisted identities", () => {
+    const config = normalizeWidgetConfig();
+    const wrongStatus = { ...disabledReceipt(), status: "queued" };
+    const wrongAction = { ...disabledReceipt(), action: "show_reply" };
+    const missingVisitorIdentity = { ...disabledReceipt(), public_message_id: "not-a-uuid" };
+    const duplicateReplyIdentity = repliedReceipt({ replyPublicMessageId: TEST_VISITOR_MESSAGE_ID });
+    const extraRootField = { ...disabledReceipt(), unexpected: true };
+    const extraReplyField = repliedReceipt();
+    const extraReply = (extraReplyField.automation as Record<string, unknown>).reply as Record<string, unknown>;
+    extraReply.unexpected = true;
+    const oversizedReply = repliedReceipt({ replyText: "x".repeat(1_001) });
+    const oversizedDisclosure = repliedReceipt({ disclosureText: "x".repeat(1_001) });
+    const whitespacePaddedAutomationStatus = repliedReceipt();
+    (whitespacePaddedAutomationStatus.automation as Record<string, unknown>).status = " replied ";
+    const whitespacePaddedFallbackReason = fallbackReceipt();
+    (whitespacePaddedFallbackReason.automation as Record<string, unknown>).reason = " model_error ";
+
+    expect(() => mapSiteWidgetResponse(wrongStatus, config)).toThrow("Invalid site_widget.v1 response: status");
+    expect(() => mapSiteWidgetResponse(wrongAction, config)).toThrow("Invalid site_widget.v1 response: action");
+    expect(() => mapSiteWidgetResponse(missingVisitorIdentity, config)).toThrow(
+      "Invalid site_widget.v1 response: public_message_id"
+    );
+    expect(() => mapSiteWidgetResponse(duplicateReplyIdentity, config)).toThrow(
+      "Invalid site_widget.v1 response: automation.reply.public_message_id_identity"
+    );
+    expect(() => mapSiteWidgetResponse(extraRootField, config)).toThrow(
+      "Invalid site_widget.v1 response: root.unexpected"
+    );
+    expect(() => mapSiteWidgetResponse(extraReplyField, config)).toThrow(
+      "Invalid site_widget.v1 response: automation.reply.unexpected"
+    );
+    expect(() => mapSiteWidgetResponse(oversizedReply, config)).toThrow(
+      "Invalid site_widget.v1 response: automation.reply.text"
+    );
+    expect(() => mapSiteWidgetResponse(oversizedDisclosure, config)).toThrow(
+      "Invalid site_widget.v1 response: automation.disclosure.text"
+    );
+    expect(() => mapSiteWidgetResponse(whitespacePaddedAutomationStatus, config)).toThrow(
+      "Invalid site_widget.v1 response: automation.status"
+    );
+    expect(() => mapSiteWidgetResponse(whitespacePaddedFallbackReason, config)).toThrow(
+      "Invalid site_widget.v1 response: automation.reason"
+    );
   });
 
   it("accepts only UUID public sessions from backend responses", () => {
     const config = normalizeWidgetConfig();
 
     expect(
-      mapSiteWidgetResponse(
-        { public_session_id: firstSessionId, automation: { status: "disabled" } },
-        config
-      ).publicSessionId
+      mapSiteWidgetResponse(disabledReceipt({ publicSessionId: firstSessionId }), config).publicSessionId
     ).toBe(firstSessionId);
-    expect(
-      mapSiteWidgetResponse(
-        { public_session_id: "sws_legacy", automation: { status: "disabled" } },
-        config
-      ).publicSessionId
-    ).toBeUndefined();
     expect(normalizePublicSessionId(` ${firstSessionId.toUpperCase()} `)).toBe(firstSessionId);
+    expect(normalizePublicSessionId("sws_legacy")).toBeUndefined();
   });
 
   it.each([undefined, "sws_legacy", "not-a-uuid"])(
@@ -137,25 +269,57 @@ describe("site widget domain", () => {
           now: "2026-07-13T00:00:00.000Z"
         }
       });
+      const responseBody = disabledReceipt();
+      responseBody.public_session_id = publicSessionId;
       const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response(
-          JSON.stringify({
-            public_session_id: publicSessionId,
-            automation: { status: "disabled", message: "Менеджер ответит вручную" }
-          }),
+          JSON.stringify(responseBody),
           { status: 202, headers: { "content-type": "application/json" } }
         )
       );
 
       try {
         await expect(sendSiteWidgetMessage(config, request)).rejects.toThrow(
-          "Widget response is missing a valid public_session_id"
+          "Invalid site_widget.v1 response: public_session_id"
         );
       } finally {
         fetchMock.mockRestore();
       }
     }
   );
+
+  it("rejects a valid response UUID that would replace an established public session", async () => {
+    const config = normalizeWidgetConfig({ apiBaseUrl: "https://ops.example.com" });
+    const request = buildSiteWidgetMessageRequest({
+      config,
+      text: "Продолжение существующей сессии",
+      publicSessionId: firstSessionId,
+      idempotencyKey: "idem_session_mismatch",
+      environment: {
+        href: "https://example.com/",
+        search: "",
+        title: "Landing",
+        referrer: "",
+        locale: "ru-RU",
+        timezone: "Europe/Moscow",
+        now: "2026-07-14T00:00:00.000Z"
+      }
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(disabledReceipt({ publicSessionId: secondSessionId })), {
+        status: 202,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    try {
+      await expect(sendSiteWidgetMessage(config, request)).rejects.toThrow(
+        "Invalid site_widget.v1 response: public_session_id_mismatch"
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
 
   it("keeps the same idempotency key while retrying a failed pending message", () => {
     const config = normalizeWidgetConfig();
@@ -234,7 +398,7 @@ describe("site widget domain", () => {
     expect(active.messages.find((message) => message.id === active.pending?.messageId)?.status).toBe("pending");
   });
 
-  it("marks only the current pending visitor as persisted", () => {
+  it("marks only the current pending visitor as explicitly saved", () => {
     const config = normalizeWidgetConfig();
     let state = createWidgetState({ config, open: true });
 
@@ -258,9 +422,22 @@ describe("site widget domain", () => {
       ]
     };
 
-    state = applyWidgetAction(state, { type: "visitor.persisted", text: "Одинаковый текст" }, config);
+    state = applyWidgetAction(
+      state,
+      {
+        type: "visitor.saved",
+        messageId: currentId ?? "",
+        publicMessageId: TEST_VISITOR_MESSAGE_ID,
+        acceptanceStatus: "replayed"
+      },
+      config
+    );
 
-    expect(state.messages.find((message) => message.id === currentId)?.status).toBe("sent");
+    expect(state.messages.find((message) => message.id === currentId)).toMatchObject({
+      status: "saved",
+      publicMessageId: TEST_VISITOR_MESSAGE_ID,
+      acceptanceStatus: "replayed"
+    });
     expect(state.messages.find((message) => message.id === "msg_older_duplicate")?.status).toBe("error");
   });
 

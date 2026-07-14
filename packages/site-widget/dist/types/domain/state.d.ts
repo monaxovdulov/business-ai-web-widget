@@ -1,4 +1,4 @@
-import type { SiteWidgetConfig, WidgetMessage, WidgetMessageStatus, WidgetSystemKind } from "../types/public";
+import type { SiteWidgetAcceptanceStatus, SiteWidgetConfig, WidgetMessage, WidgetMessageStatus, WidgetSystemKind } from "../types/public";
 export type WidgetStatus = "closed" | "open_idle" | "composing" | "submitting" | "submitted_waiting" | "replied" | "fallback" | "disabled" | "error";
 export type PendingSubmission = {
     messageId: string;
@@ -37,12 +37,18 @@ export type WidgetAction = {
 } | {
     type: "retry.started";
 } | {
-    type: "visitor.persisted";
-    text: string;
-    messageId?: string;
+    type: "visitor.saved";
+    messageId: string;
+    publicMessageId: string;
+    acceptanceStatus: SiteWidgetAcceptanceStatus;
+} | {
+    type: "visitor.mocked";
+    messageId: string;
 } | {
     type: "assistant.replied";
     text: string;
+    publicMessageId?: string | undefined;
+    disclosureText?: string | undefined;
 } | {
     type: "system.message";
     text: string;
@@ -61,11 +67,14 @@ export declare function createWidgetState({ config, open, now }: {
 }): WidgetState;
 export declare function applyWidgetAction(state: WidgetState, action: WidgetAction, config?: SiteWidgetConfig): WidgetState;
 export declare function validateDraft(text: string, config: SiteWidgetConfig): "empty_message" | "message_too_long" | null;
-export declare function createWidgetMessage({ role, text, status, disclosure, systemKind, createdAt }: {
+export declare function createWidgetMessage({ role, text, status, disclosure, publicMessageId, acceptanceStatus, disclosureText, systemKind, createdAt }: {
     role: WidgetMessage["role"];
     text: string;
     status?: WidgetMessageStatus;
     disclosure?: boolean;
+    publicMessageId?: string | undefined;
+    acceptanceStatus?: SiteWidgetAcceptanceStatus;
+    disclosureText?: string | undefined;
     systemKind?: WidgetSystemKind;
     createdAt?: string;
 }): WidgetMessage;

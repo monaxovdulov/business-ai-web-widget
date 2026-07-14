@@ -1,5 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "playwright/test";
+import {
+  disabledReceipt,
+  fallbackReceipt,
+  repliedReceipt,
+  TEST_VISITOR_MESSAGE_ID
+} from "../helpers/response-fixtures";
 
 type FixtureWindow = Window &
   typeof globalThis & {
@@ -83,13 +89,10 @@ test("open/close возвращает focus и переключает normal, wi
 test("replied сохраняет strict site_widget.v1 и production не показывает photo UI", async ({ page }) => {
   const captured = await interceptApi(page, [
     {
-      body: {
-        public_session_id: "55555555-5555-4555-8555-555555555555",
-        automation: {
-          status: "replied",
-          reply: { text: "Подготовим варианты и передадим менеджеру.", persisted: true }
-        }
-      }
+      body: repliedReceipt({
+        publicSessionId: "55555555-5555-4555-8555-555555555555",
+        replyText: "Подготовим варианты и передадим менеджеру."
+      })
     }
   ]);
   await gotoWidget(page, { open: true, attachments: true, scenario: "replied" });
@@ -108,20 +111,83 @@ test("replied сохраняет strict site_widget.v1 и production не пок
   expect(request?.body.public_session_id).toBeUndefined();
   expect(allKeys(request?.body)).not.toEqual(expect.arrayContaining(["attachments", "file", "filename", "mimeType"]));
   expect(widget(page).locator(".message-attachment__preview")).toHaveCount(0);
+  await expect(widget(page).locator(".message-root--visitor")).toHaveAttribute("data-message-status", "saved");
   await saveScreenshot(page, "replied-desktop");
+});
+
+test("deferred response показывает pending bubble и отдельный sending status не позднее 300 ms", async ({ page }) => {
+  let releaseResponse: () => void = () => undefined;
+  const responseGate = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+  await page.route(apiRoute, async (route) => {
+    await responseGate;
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(
+        repliedReceipt({
+          publicSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          replyText: "Ответ после подтверждённого сохранения."
+        })
+      )
+    });
+  });
+  await gotoWidget(page, { open: true, scenario: "deferred-pending-timing" });
+  await page.getByRole("textbox", { name: "Напишите сообщение..." }).fill("Проверка мгновенной реакции");
+
+  const pendingElapsedMs = await page.evaluate(async () => {
+    const host = document.querySelector("granit-site-widget");
+    const shadow = host?.shadowRoot;
+    const form = shadow?.querySelector<HTMLFormElement>("form.composer");
+    if (!shadow || !form) throw new Error("Widget form is not ready");
+
+    return new Promise<number>((resolve, reject) => {
+      const startedAt = performance.now();
+      let timeoutId = 0;
+      const observer = new MutationObserver(check);
+
+      function check(): void {
+        const pendingBubble = shadow?.querySelector(
+          '.message-root--visitor[data-message-status="pending"] .message__text'
+        );
+        const sendingStatus = shadow?.querySelector('.message-root--visitor .message-status');
+        if (!pendingBubble || !sendingStatus?.textContent?.includes("Отправляем")) return;
+        observer.disconnect();
+        window.clearTimeout(timeoutId);
+        resolve(performance.now() - startedAt);
+      }
+
+      observer.observe(shadow, { attributes: true, childList: true, characterData: true, subtree: true });
+      timeoutId = window.setTimeout(() => {
+        observer.disconnect();
+        reject(new Error("Pending UI was not rendered within 1000 ms"));
+      }, 1_000);
+      form.requestSubmit();
+      check();
+    });
+  });
+
+  expect(pendingElapsedMs).toBeLessThanOrEqual(300);
+  const visitorRoot = widget(page).locator(".message-root--visitor");
+  await expect(visitorRoot).toHaveAttribute("data-message-status", "pending");
+  await expect(visitorRoot.locator(".message-status")).toContainText("Отправляем");
+
+  releaseResponse();
+  await expect(visitorRoot).toHaveAttribute("data-message-status", "saved");
+  await expect(visitorRoot).toHaveAttribute("data-public-message-id", TEST_VISITOR_MESSAGE_ID);
+  await expect(page.getByText("Ответ после подтверждённого сохранения.")).toBeVisible();
 });
 
 test("error остаётся одной зоной, retry сохраняет message id и idempotency key", async ({ page }) => {
   const captured = await interceptApi(page, [
     { status: 500, body: { message: "temporary browser failure" } },
     {
-      body: {
-        public_session_id: "66666666-6666-4666-8666-666666666666",
-        automation: {
-          status: "replied",
-          reply: { text: "Повторная отправка принята.", persisted: true }
-        }
-      }
+      body: repliedReceipt({
+        acceptanceStatus: "replayed",
+        publicSessionId: "66666666-6666-4666-8666-666666666666",
+        replyText: "Повторная отправка принята."
+      })
     }
   ]);
   await gotoWidget(page, { open: true, scenario: "error-retry" });
@@ -150,19 +216,17 @@ test("error остаётся одной зоной, retry сохраняет mes
   );
   await expect(visitorRoot).toHaveCount(1);
   await expect(widget(page).locator(".message--error")).toHaveCount(0);
+  await expect(visitorRoot).toHaveAttribute("data-message-status", "saved");
+  await expect(visitorRoot).toHaveAttribute("data-acceptance-status", "replayed");
 });
 
 test("fallback рендерится Marker и проходит axe", async ({ page }) => {
   await interceptApi(page, [
     {
-      body: {
-        public_session_id: "77777777-7777-4777-8777-777777777777",
-        automation: {
-          status: "fallback",
-          message: "Менеджер проверит детали и ответит вам.",
-          reason: "browser_fallback"
-        }
-      }
+      body: fallbackReceipt({
+        publicSessionId: "77777777-7777-4777-8777-777777777777",
+        messageToUser: "Менеджер проверит детали и ответит вам."
+      })
     }
   ]);
   await gotoWidget(page, { open: true, scenario: "fallback" });
@@ -179,13 +243,10 @@ test("fallback рендерится Marker и проходит axe", async ({ pa
 test("disabled также использует Marker", async ({ page }) => {
   await interceptApi(page, [
     {
-      body: {
-        public_session_id: "88888888-8888-4888-8888-888888888888",
-        automation: {
-          status: "disabled",
-          message: "Автоответ отключён, менеджер ответит вручную."
-        }
-      }
+      body: disabledReceipt({
+        publicSessionId: "88888888-8888-4888-8888-888888888888",
+        messageToUser: "Автоответ отключён, менеджер ответит вручную."
+      })
     }
   ]);
   await gotoWidget(page, { open: true, scenario: "disabled" });
@@ -220,13 +281,10 @@ test("mock preview принимает 1 и 3 PNG, проходит axe и ост
 test("keyboard-only flow открывает, отправляет и закрывает widget", async ({ page }) => {
   await interceptApi(page, [
     {
-      body: {
-        public_session_id: "99999999-9999-4999-8999-999999999999",
-        automation: {
-          status: "replied",
-          reply: { text: "Keyboard flow принят.", persisted: true }
-        }
-      }
+      body: repliedReceipt({
+        publicSessionId: "99999999-9999-4999-8999-999999999999",
+        replyText: "Keyboard flow принят."
+      })
     }
   ]);
   await gotoWidget(page, { scenario: "keyboard" });

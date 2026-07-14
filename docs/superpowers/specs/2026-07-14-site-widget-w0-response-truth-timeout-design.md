@@ -23,6 +23,8 @@ protocol failure исходный текст и idempotency key остаются
 - `mapSiteWidgetResponse` принимает только успешный `site_widget.v1` receipt: `ok: true`,
   `schema_version: "site_widget.v1"`, root `status` из `accepted|replayed`,
   `action: "show_widget_saved"`, валидные UUID session и visitor public message.
+- Root и каждый nested variant принимают только опубликованный allowlist полей; reply/disclosure
+  сохраняют contract length limits. Лишнее поле или превышение лимита является protocol failure.
 - Для `automation.status: "replied"` дополнительно обязательны persisted reply UUID,
   `sender_role: "ai_assistant"`, непустой text, корректные `next_step` и disclosure. Visitor и
   reply identities должны отличаться.
@@ -31,12 +33,15 @@ protocol failure исходный текст и idempotency key остаются
   локальным fallback.
 - Production response view model несёт server receipt и IDs. Mock response помечен отдельно и не
   выдаётся за server persistence proof.
+- Для уже установленной public session response обязан вернуть тот же UUID. Mismatch не меняет
+  storage/state, оставляет bubble retryable и не показывает automation result.
 - Локальная visitor bubble остаётся `pending` до receipt, после чего получает явный status
   `saved` и server public message ID. Replay применяет тот же pending message и idempotency key.
   Ошибка оставляет один status `error` с inline retry и не создаёт assistant bubble.
-- Default browser timeout — 25 секунд. Нормализация не допускает значение меньше 20 001 мс:
-  это строго больше provider/backend budget 15 000 мс плюс ограниченный network/persistence
-  allowance 5 000 мс.
+- Total server deadline фиксирован в 20 000 мс: provider/backend budget 15 000 мс плюс
+  ограниченный network/persistence allowance 5 000 мс. Default browser timeout — 25 секунд,
+  нормализация не допускает значение меньше 20 001 мс, а intake client реально abort'ит fetch по
+  browser deadline.
 
 ## Проверки
 
