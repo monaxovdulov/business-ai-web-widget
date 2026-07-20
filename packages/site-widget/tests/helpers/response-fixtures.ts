@@ -21,6 +21,7 @@ export function repliedReceipt(
   return receiptBase(options, {
     status: "replied",
     next_step: "ai_reply_shown",
+    conversation_state: "ai_active",
     disclosure: {
       shown: true,
       version: "widget-ai-disclosure.v1",
@@ -51,6 +52,9 @@ export function fallbackReceipt(
       | "model_error"
       | "empty_model_response"
       | "unsafe_model_response"
+      | "semantic_verifier_error"
+      | "grounding_validation_failed"
+      | "turn_timeout"
       | "agent_reply_blocked"
       | "ai_persistence_unconfirmed";
   } = {}
@@ -61,6 +65,25 @@ export function fallbackReceipt(
       status: "fallback",
       next_step: "manager_review",
       reason: options.reason ?? "model_error"
+    }
+  );
+}
+
+export function degradedReceipt(
+  options: ReceiptOptions & {
+    reason?: "semantic_verifier_error" | "grounding_validation_failed" | "turn_timeout";
+  } = {}
+): Record<string, unknown> {
+  return receiptBase(
+    {
+      messageToUser: "Сообщение сохранено, но AI не смог ответить на этот ход.",
+      ...options
+    },
+    {
+      status: "degraded",
+      next_step: "retry_available",
+      conversation_state: "ai_active",
+      reason: options.reason ?? "grounding_validation_failed"
     }
   );
 }

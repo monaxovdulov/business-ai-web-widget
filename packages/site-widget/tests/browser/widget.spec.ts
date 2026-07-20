@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "playwright/test";
 import {
   disabledReceipt,
+  degradedReceipt,
   fallbackReceipt,
   repliedReceipt,
   TEST_VISITOR_MESSAGE_ID
@@ -238,6 +239,24 @@ test("fallback рендерится Marker и проходит axe", async ({ pa
   await expect(widget(page).locator("article.message--system")).toHaveCount(0);
   await expectNoAxeViolations(page, "fallback desktop");
   await saveScreenshot(page, "fallback-desktop");
+});
+
+test("degraded подтверждает сохранение и не показывает ошибку отправки", async ({ page }) => {
+  await interceptApi(page, [
+    {
+      body: degradedReceipt({
+        publicSessionId: "12121212-1212-4212-8212-121212121212"
+      })
+    }
+  ]);
+  await gotoWidget(page, { open: true, scenario: "degraded-saved" });
+  await submitText(page, "Нужна консультация");
+
+  const visitorRoot = widget(page).locator(".message-root--visitor");
+  await expect(visitorRoot).toHaveAttribute("data-message-status", "saved");
+  await expect(widget(page).locator(".marker")).toContainText("Сообщение сохранено");
+  await expect(page.getByRole("button", { name: "Повторить" })).toHaveCount(0);
+  await expect(widget(page).locator(".message--error")).toHaveCount(0);
 });
 
 test("disabled также использует Marker", async ({ page }) => {

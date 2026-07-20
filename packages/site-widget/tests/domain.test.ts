@@ -21,6 +21,7 @@ import { sendSiteWidgetMessage } from "../src/services/intake-client";
 import { createSessionStore } from "../src/services/session-store";
 import {
   disabledReceipt,
+  degradedReceipt,
   fallbackReceipt,
   repliedReceipt,
   TEST_REPLY_MESSAGE_ID,
@@ -194,6 +195,11 @@ describe("site widget domain", () => {
       }
     );
     expect(mapSiteWidgetResponse(disabledReceipt(), config)).toMatchObject({ status: "disabled" });
+    expect(mapSiteWidgetResponse(degradedReceipt(), config)).toMatchObject({
+      status: "fallback",
+      systemText: "Сообщение сохранено, но AI не смог ответить на этот ход.",
+      reason: "grounding_validation_failed"
+    });
   });
 
   it("rejects responses that cannot prove root truth or persisted identities", () => {

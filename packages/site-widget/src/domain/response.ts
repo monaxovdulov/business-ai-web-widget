@@ -10,6 +10,9 @@ const FALLBACK_REASONS = new Set([
   "model_error",
   "empty_model_response",
   "unsafe_model_response",
+  "semantic_verifier_error",
+  "grounding_validation_failed",
+  "turn_timeout",
   "agent_reply_blocked",
   "ai_persistence_unconfirmed"
 ]);
@@ -24,7 +27,8 @@ const ROOT_KEYS = [
   "automation",
   "message_to_user"
 ] as const;
-const REPLIED_AUTOMATION_KEYS = ["status", "next_step", "disclosure", "reply"] as const;
+const REPLIED_AUTOMATION_KEYS = ["status", "next_step", "conversation_state", "disclosure", "reply"] as const;
+const DEGRADED_AUTOMATION_KEYS = ["status", "next_step", "conversation_state", "reason"] as const;
 const FALLBACK_AUTOMATION_KEYS = ["status", "next_step", "reason"] as const;
 const DISABLED_AUTOMATION_KEYS = ["status", "next_step"] as const;
 const DISCLOSURE_KEYS = ["shown", "version", "text"] as const;
@@ -56,6 +60,9 @@ export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): 
   if (automationStatus === "replied") {
     requireExactKeys(automation, REPLIED_AUTOMATION_KEYS, "automation");
     if (automation.next_step !== "ai_reply_shown") protocolError("automation.next_step");
+    if (automation.conversation_state !== undefined) {
+      requireConversationState(automation.conversation_state, ["ai_active", "manager_pending"]);
+    }
     const disclosure = requireRecord(automation.disclosure, "automation.disclosure");
     requireExactKeys(disclosure, DISCLOSURE_KEYS, "automation.disclosure");
     if (disclosure.shown !== true) protocolError("automation.disclosure.shown");
@@ -75,6 +82,20 @@ export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): 
       replyText,
       replyPublicMessageId,
       disclosureText
+    };
+  }
+
+  if (automationStatus === "degraded") {
+    requireExactKeys(automation, DEGRADED_AUTOMATION_KEYS, "automation");
+    if (automation.next_step !== "retry_available") protocolError("automation.next_step");
+    requireConversationState(automation.conversation_state, ["ai_active"]);
+    const reason = requireString(automation.reason, "automation.reason");
+    if (!FALLBACK_REASONS.has(reason)) protocolError("automation.reason");
+    return {
+      ...base,
+      status: "fallback",
+      systemText: messageToUser.trim() || config.fallbackMessage,
+      reason
     };
   }
 
@@ -107,6 +128,12 @@ export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): 
 function requireAcceptanceStatus(value: unknown): SiteWidgetAcceptanceStatus {
   if (value === "accepted" || value === "replayed") return value;
   return protocolError("status");
+}
+
+function requireConversationState(value: unknown, allowedStates: readonly string[]): string {
+  const state = requireString(value, "automation.conversation_state");
+  if (!allowedStates.includes(state)) protocolError("automation.conversation_state");
+  return state;
 }
 
 function requireUuid(value: unknown, field: string): string {
