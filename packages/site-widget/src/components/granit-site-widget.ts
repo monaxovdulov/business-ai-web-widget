@@ -22,7 +22,12 @@ import { widgetStyles } from "../styles/widget.styles";
 import type { SiteWidgetAction, SiteWidgetConfig, SiteWidgetContact, SiteWidgetPanelSize } from "../types/public";
 import { widgetIcon } from "../ui/icons";
 import { renderAttachmentPicker, renderAttachmentPreviewList } from "./widget-attachments";
-import { renderChatItem, renderDateSeparator, renderTypingIndicator } from "./widget-message";
+import {
+  millisecondsUntilNextLocalDay,
+  renderChatItem,
+  renderDateSeparator,
+  renderTypingIndicator
+} from "./widget-message";
 
 export const SITE_WIDGET_TAG_NAME = "granit-site-widget";
 
@@ -51,6 +56,7 @@ export class GranitSiteWidgetElement extends LitElement {
   private historyAbortController: AbortController | undefined;
   private historyEpoch = 0;
   private operationEpoch = 0;
+  private dateRolloverTimer: number | undefined;
   private readonly messageScroller = new MessageScrollerController(this);
   private readonly imageAttachments = new ImageAttachmentController(this);
   private sendMessageRequest = sendSiteWidgetMessage;
@@ -62,11 +68,13 @@ export class GranitSiteWidgetElement extends LitElement {
     const reconnecting = this.hasBooted;
     super.connectedCallback();
     this.boot();
+    this.scheduleDateRollover();
     if (reconnecting) this.requestUpdate();
   }
 
   override disconnectedCallback(): void {
     this.invalidateActiveWork(true);
+    this.clearDateRolloverTimer();
     super.disconnectedCallback();
   }
 
@@ -161,7 +169,7 @@ export class GranitSiteWidgetElement extends LitElement {
       pendingMessage?.status === "error"
         ? this.config.errorMessage
         : pendingMessage?.status === "pending"
-          ? "Отправляем сообщение."
+          ? "Сообщение отправлено из браузера."
           : view.awaitingAi
             ? "Сообщение принято. AI-помощник печатает."
             : "";
@@ -446,6 +454,22 @@ export class GranitSiteWidgetElement extends LitElement {
 
   private persistOpenState(open: boolean): void {
     if (this.config.persistOpenState) this.sessionStore?.setOpenState(open);
+  }
+
+  private scheduleDateRollover(): void {
+    this.clearDateRolloverTimer();
+    this.dateRolloverTimer = globalThis.setTimeout(() => {
+      this.dateRolloverTimer = undefined;
+      if (!this.isConnected) return;
+      this.requestUpdate();
+      this.scheduleDateRollover();
+    }, millisecondsUntilNextLocalDay());
+  }
+
+  private clearDateRolloverTimer(): void {
+    if (this.dateRolloverTimer === undefined) return;
+    globalThis.clearTimeout(this.dateRolloverTimer);
+    this.dateRolloverTimer = undefined;
   }
 
   private cyclePanelSize = (): void => {

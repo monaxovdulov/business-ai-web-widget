@@ -152,10 +152,11 @@ export const messageStyles = css`
     gap: 5px;
   }
 
-  .message-status__spinner {
-    animation: message-spinner 900ms linear infinite;
+  .message-status__checks {
+    color: var(--sw-color-accent);
     display: inline-flex;
-    margin-right: 5px;
+    font-weight: 700;
+    letter-spacing: -2px;
   }
 
   .message-actions .retry-button {
@@ -257,12 +258,6 @@ export const messageStyles = css`
 
   .typing__dots i:nth-child(3) {
     animation-delay: 280ms;
-  }
-
-  @keyframes message-spinner {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   @keyframes typing-pulse {

@@ -73,8 +73,8 @@ SiteWidgetRoot
 | `opening` | Panel animates in; focus moves to first meaningful control. |
 | `open_idle` | Greeting, quick replies, empty input. |
 | `composing` | Input has text; send button enabled. |
-| `submitting` | Visitor message appears; send button disabled; pending indicator visible. |
-| `submitted_waiting` | Server accepted the visitor message; composer is usable and a separate AI typing indicator is visible while history reports active work. |
+| `submitting` | Visitor message appears with `✓ Отправлено`; send button is disabled until the acknowledgment. |
+| `submitted_waiting` | Server accepted the visitor message; metadata becomes `✓✓ Принято`, the composer is usable and a separate AI typing indicator is visible while history reports active work. |
 | `replied` | Persisted history contains an assistant message; disclosure appears once per dialogue. |
 | `fallback` | Manager handoff message appears. |
 | `disabled` | Manager review message appears. |

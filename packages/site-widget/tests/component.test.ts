@@ -107,7 +107,12 @@ describe("granit-site-widget Lit component", () => {
     widget.sendMessage("Проверка статуса");
     await vi.waitFor(() => {
       expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("true");
-      expect(widget.shadowRoot?.querySelector('[aria-atomic="true"]')?.textContent).toContain("Отправляем сообщение");
+      expect(widget.shadowRoot?.querySelector('[aria-atomic="true"]')?.textContent).toContain(
+        "Сообщение отправлено из браузера"
+      );
+      expect(widget.shadowRoot?.querySelector('.message-status')?.textContent).toContain("Отправлено");
+      expect(widget.shadowRoot?.querySelector('.message-status__checks')?.textContent).toBe("✓");
+      expect(widget.shadowRoot?.querySelector('.message-status__spinner')).toBeNull();
     });
 
     resolveRequest({ source: "mock", status: "replied", replyText: "Готово", raw: {} });
@@ -165,6 +170,7 @@ describe("granit-site-widget Lit component", () => {
     });
 
     expect(widget.shadowRoot?.textContent).toContain("Принято");
+    expect(widget.shadowRoot?.querySelector('.message-status__checks')?.textContent).toBe("✓✓");
     expect(widget.shadowRoot?.querySelector<HTMLTextAreaElement>(".textarea")?.disabled).toBe(false);
     expect(requests[0]?.body?.schema_version).toBe("site_widget.v2");
 
@@ -183,7 +189,13 @@ describe("granit-site-widget Lit component", () => {
     expect(link?.getAttribute("target")).toBe("_self");
     expect(link?.textContent).toContain("Посмотреть «Арфа»");
     expect(widget.shadowRoot?.querySelectorAll('[part~="message-disclosure"]')).toHaveLength(1);
-    expect(widget.shadowRoot?.querySelectorAll(".message-time")).toHaveLength(2);
+    const times = [...(widget.shadowRoot?.querySelectorAll<HTMLTimeElement>(".message-time") ?? [])];
+    expect(times).toHaveLength(2);
+    expect(times.every((time) => Boolean(time.getAttribute("aria-label")?.match(/2026/u)))).toBe(true);
+    expect(times.map((time) => time.getAttribute("datetime"))).toEqual([
+      "2026-07-22T19:00:00.000Z",
+      "2026-07-22T19:00:02.000Z"
+    ]);
     expect(widget.shadowRoot?.textContent).not.toContain("/catalog.html?");
     expect(requests.some((request) => request.url.includes("site_widget.history.v2"))).toBe(true);
   });

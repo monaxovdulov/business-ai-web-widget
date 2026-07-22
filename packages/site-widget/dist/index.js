@@ -114,11 +114,11 @@ function Re(s = {}) {
   const e = { ...D, ...s }, t = ze(e.timeoutMs), i = xt(e.maxMessageLength, D.maxMessageLength, 1e4);
   return {
     ...e,
-    apiBaseUrl: ns(x(e.apiBaseUrl)),
+    apiBaseUrl: ns(_(e.apiBaseUrl)),
     messagesPath: rs(e.messagesPath),
     timeoutMs: t,
-    widgetInstanceId: x(e.widgetInstanceId) || D.widgetInstanceId,
-    theme: x(e.theme) || D.theme,
+    widgetInstanceId: _(e.widgetInstanceId) || D.widgetInstanceId,
+    theme: _(e.theme) || D.theme,
     position: es(e.position),
     panelSize: ts(e.panelSize),
     mock: !!e.mock,
@@ -135,8 +135,8 @@ function Re(s = {}) {
     maxMessageLength: i,
     phoneHref: q(e.phoneHref),
     privacyUrl: q(e.privacyUrl),
-    quickReplies: $e(e.quickReplies),
-    mobileActions: Ee(e.mobileActions, e.phoneHref)
+    quickReplies: Ee(e.quickReplies),
+    mobileActions: Me(e.mobileActions, e.phoneHref)
   };
 }
 function ze(s) {
@@ -165,7 +165,7 @@ function Qt(s) {
   const e = s.trim();
   if (!e) return [];
   const t = Le(e);
-  return Array.isArray(t) ? $e(t) : $e(
+  return Array.isArray(t) ? Ee(t) : Ee(
     e.split("|").map((i) => ({ label: i.trim(), text: i.trim() })).filter((i) => i.label)
   );
 }
@@ -173,26 +173,26 @@ function Zt(s) {
   const e = s.trim();
   if (!e) return [];
   const t = Le(e);
-  return Array.isArray(t) ? Ee(t) : Ee(
+  return Array.isArray(t) ? Me(t) : Me(
     e.split("|").map((i) => ({ type: "open", label: i.trim() })).filter((i) => i.label)
   );
 }
-function $e(s = []) {
+function Ee(s = []) {
   return s.map((e) => {
-    const t = x(e?.label), i = x(e?.text ?? e?.value ?? e?.label);
+    const t = _(e?.label), i = _(e?.text ?? e?.value ?? e?.label);
     return { label: t, text: i };
   }).filter((e) => e.label.length > 0 && e.text.length > 0).slice(0, 6);
 }
-function Ee(s = [], e) {
+function Me(s = [], e) {
   return s.map((t) => {
-    const i = x(t?.label);
+    const i = _(t?.label);
     if (i) {
       if (t.type === "call") {
-        const o = x(t.href || e || "tel:");
+        const o = _(t.href || e || "tel:");
         return { type: "call", label: i, href: o, icon: q(t.icon) };
       }
       if (t.type === "link") {
-        const o = x(t.href);
+        const o = _(t.href);
         return o ? {
           type: "link",
           label: i,
@@ -202,7 +202,7 @@ function Ee(s = [], e) {
         } : void 0;
       }
       if (t.type === "prefill") {
-        const o = x(t.text);
+        const o = _(t.text);
         return o ? { type: "prefill", label: i, text: o, icon: q(t.icon) } : void 0;
       }
       return { type: "open", label: i, icon: q(t.icon) };
@@ -229,24 +229,24 @@ function Xt(s) {
   return e === "" || e === "1" || e === "true" || e === "yes";
 }
 function es(s) {
-  const e = x(s);
+  const e = _(s);
   return e === "bottom-left" || e === "inline" ? e : "bottom-right";
 }
 function ts(s) {
-  const e = x(s);
+  const e = _(s);
   return e === "wide" || e === "fullscreen" ? e : "normal";
 }
 function ss(s) {
-  return x(s) === "open" ? "open" : "closed";
+  return _(s) === "open" ? "open" : "closed";
 }
 function is(s) {
-  return x(s) === "memory" ? "memory" : "local";
+  return _(s) === "memory" ? "memory" : "local";
 }
 function os(s) {
-  return x(s) === "auto" ? "auto" : "prefill";
+  return _(s) === "auto" ? "auto" : "prefill";
 }
 function rs(s) {
-  const e = x(s);
+  const e = _(s);
   return e ? e.startsWith("/") ? e : `/${e}` : D.messagesPath;
 }
 function xt(s, e, t) {
@@ -257,9 +257,9 @@ function ns(s) {
   return s.replace(/\/+$/, "");
 }
 function q(s) {
-  return x(s) || void 0;
+  return _(s) || void 0;
 }
-function x(s) {
+function _(s) {
   return String(s ?? "").trim();
 }
 function Le(s) {
@@ -316,7 +316,7 @@ const as = (s) => new St(typeof s == "string" ? s : s + "", void 0, Oe), At = (s
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const { is: ls, defineProperty: ds, getOwnPropertyDescriptor: hs, getOwnPropertyNames: us, getOwnPropertySymbols: ps, getPrototypeOf: ms } = Object, me = globalThis, Ve = me.trustedTypes, gs = Ve ? Ve.emptyScript : "", fs = me.reactiveElementPolyfillSupport, Y = (s, e) => s, Me = { toAttribute(s, e) {
+const { is: ls, defineProperty: ds, getOwnPropertyDescriptor: hs, getOwnPropertyNames: us, getOwnPropertySymbols: ps, getPrototypeOf: ms } = Object, ge = globalThis, Ve = ge.trustedTypes, gs = Ve ? Ve.emptyScript : "", fs = ge.reactiveElementPolyfillSupport, Y = (s, e) => s, Ie = { toAttribute(s, e) {
   switch (e) {
     case Boolean:
       s = s ? gs : null;
@@ -344,8 +344,8 @@ const { is: ls, defineProperty: ds, getOwnPropertyDescriptor: hs, getOwnProperty
       }
   }
   return t;
-} }, $t = (s, e) => !ls(s, e), Ge = { attribute: !0, type: String, converter: Me, reflect: !1, useDefault: !1, hasChanged: $t };
-Symbol.metadata ??= Symbol("metadata"), me.litPropertyMetadata ??= /* @__PURE__ */ new WeakMap();
+} }, $t = (s, e) => !ls(s, e), Ge = { attribute: !0, type: String, converter: Ie, reflect: !1, useDefault: !1, hasChanged: $t };
+Symbol.metadata ??= Symbol("metadata"), ge.litPropertyMetadata ??= /* @__PURE__ */ new WeakMap();
 let B = class extends HTMLElement {
   static addInitializer(e) {
     this._$Ei(), (this.l ??= []).push(e);
@@ -443,14 +443,14 @@ let B = class extends HTMLElement {
   _$ET(e, t) {
     const i = this.constructor.elementProperties.get(e), o = this.constructor._$Eu(e, i);
     if (o !== void 0 && i.reflect === !0) {
-      const r = (i.converter?.toAttribute !== void 0 ? i.converter : Me).toAttribute(t, i.type);
+      const r = (i.converter?.toAttribute !== void 0 ? i.converter : Ie).toAttribute(t, i.type);
       this._$Em = e, r == null ? this.removeAttribute(o) : this.setAttribute(o, r), this._$Em = null;
     }
   }
   _$AK(e, t) {
     const i = this.constructor, o = i._$Eh.get(e);
     if (o !== void 0 && this._$Em !== o) {
-      const r = i.getPropertyOptions(o), n = typeof r.converter == "function" ? { fromAttribute: r.converter } : r.converter?.fromAttribute !== void 0 ? r.converter : Me;
+      const r = i.getPropertyOptions(o), n = typeof r.converter == "function" ? { fromAttribute: r.converter } : r.converter?.fromAttribute !== void 0 ? r.converter : Ie;
       this._$Em = o;
       const l = n.fromAttribute(t, r.type);
       this[o] = l ?? this._$Ej?.get(o) ?? l, this._$Em = null;
@@ -527,15 +527,15 @@ let B = class extends HTMLElement {
   firstUpdated(e) {
   }
 };
-B.elementStyles = [], B.shadowRootOptions = { mode: "open" }, B[Y("elementProperties")] = /* @__PURE__ */ new Map(), B[Y("finalized")] = /* @__PURE__ */ new Map(), fs?.({ ReactiveElement: B }), (me.reactiveElementVersions ??= []).push("2.1.2");
+B.elementStyles = [], B.shadowRootOptions = { mode: "open" }, B[Y("elementProperties")] = /* @__PURE__ */ new Map(), B[Y("finalized")] = /* @__PURE__ */ new Map(), fs?.({ ReactiveElement: B }), (ge.reactiveElementVersions ??= []).push("2.1.2");
 /**
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const Be = globalThis, Ye = (s) => s, de = Be.trustedTypes, Qe = de ? de.createPolicy("lit-html", { createHTML: (s) => s }) : void 0, Et = "$lit$", T = `lit$${Math.random().toFixed(9).slice(2)}$`, Mt = "?" + T, bs = `<${Mt}>`, U = document, te = () => U.createComment(""), se = (s) => s === null || typeof s != "object" && typeof s != "function", De = Array.isArray, vs = (s) => De(s) || typeof s?.[Symbol.iterator] == "function", we = `[ 	
-\f\r]`, V = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, Ze = /-->/g, Je = />/g, P = RegExp(`>|${we}(?:([^\\s"'>=/]+)(${we}*=${we}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g"), Xe = /'/g, et = /"/g, It = /^(?:script|style|textarea|title)$/i, kt = (s) => (e, ...t) => ({ _$litType$: s, strings: e, values: t }), b = kt(1), S = kt(2), O = Symbol.for("lit-noChange"), p = Symbol.for("lit-nothing"), tt = /* @__PURE__ */ new WeakMap(), L = U.createTreeWalker(U, 129);
+const Be = globalThis, Ye = (s) => s, de = Be.trustedTypes, Qe = de ? de.createPolicy("lit-html", { createHTML: (s) => s }) : void 0, Et = "$lit$", T = `lit$${Math.random().toFixed(9).slice(2)}$`, Mt = "?" + T, bs = `<${Mt}>`, U = document, te = () => U.createComment(""), se = (s) => s === null || typeof s != "object" && typeof s != "function", De = Array.isArray, vs = (s) => De(s) || typeof s?.[Symbol.iterator] == "function", ye = `[ 	
+\f\r]`, V = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g, Ze = /-->/g, Je = />/g, P = RegExp(`>|${ye}(?:([^\\s"'>=/]+)(${ye}*=${ye}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`, "g"), Xe = /'/g, et = /"/g, It = /^(?:script|style|textarea|title)$/i, kt = (s) => (e, ...t) => ({ _$litType$: s, strings: e, values: t }), f = kt(1), x = kt(2), O = Symbol.for("lit-noChange"), p = Symbol.for("lit-nothing"), tt = /* @__PURE__ */ new WeakMap(), L = U.createTreeWalker(U, 129);
 function Tt(s, e) {
   if (!De(s) || !s.hasOwnProperty("raw")) throw Error("invalid template strings array");
   return Qe !== void 0 ? Qe.createHTML(e) : e;
@@ -566,7 +566,7 @@ class ie {
       if (o.nodeType === 1) {
         if (o.hasAttributes()) for (const h of o.getAttributeNames()) if (h.endsWith(Et)) {
           const u = d[n++], g = o.getAttribute(h).split(T), v = /([.?@])?(.*)/.exec(u);
-          a.push({ type: 1, index: r, name: v[2], strings: g, ctor: v[1] === "." ? _s : v[1] === "?" ? xs : v[1] === "@" ? Ss : ge }), o.removeAttribute(h);
+          a.push({ type: 1, index: r, name: v[2], strings: g, ctor: v[1] === "." ? _s : v[1] === "?" ? xs : v[1] === "@" ? Ss : fe }), o.removeAttribute(h);
         } else h.startsWith(T) && (a.push({ type: 6, index: r }), o.removeAttribute(h));
         if (It.test(o.tagName)) {
           const h = o.textContent.split(T), u = h.length - 1;
@@ -682,7 +682,7 @@ class K {
     this._$AM === void 0 && (this._$Cv = e, this._$AP?.(e));
   }
 }
-class ge {
+class fe {
   get tagName() {
     return this.element.tagName;
   }
@@ -707,7 +707,7 @@ class ge {
     e === p ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, e ?? "");
   }
 }
-class _s extends ge {
+class _s extends fe {
   constructor() {
     super(...arguments), this.type = 3;
   }
@@ -715,7 +715,7 @@ class _s extends ge {
     this.element[this.name] = e === p ? void 0 : e;
   }
 }
-class xs extends ge {
+class xs extends fe {
   constructor() {
     super(...arguments), this.type = 4;
   }
@@ -723,7 +723,7 @@ class xs extends ge {
     this.element.toggleAttribute(this.name, !!e && e !== p);
   }
 }
-class Ss extends ge {
+class Ss extends fe {
   constructor(e, t, i, o, r) {
     super(e, t, i, o, r), this.type = 5;
   }
@@ -837,7 +837,7 @@ const { I: Ts } = $s, st = (s) => s, it = () => document.createComment(""), G = 
     }
   }
   return t;
-}, C = (s, e, t = s) => (s._$AI(e, t), s), Ps = {}, Rt = (s, e = Ps) => s._$AH = e, Cs = (s) => s._$AH, ye = (s) => {
+}, C = (s, e, t = s) => (s._$AI(e, t), s), Ps = {}, Rt = (s, e = Ps) => s._$AH = e, Cs = (s) => s._$AH, _e = (s) => {
   s._$AR(), s._$AA.remove();
 };
 /**
@@ -876,21 +876,21 @@ const ot = (s, e, t) => {
     else if (l[h] === n[v]) a[v] = C(o[h], r[v]), G(s, a[v + 1], o[h]), h++, v--;
     else if (l[u] === n[g]) a[g] = C(o[u], r[g]), G(s, o[h], o[u]), u--, g++;
     else if (c === void 0 && (c = ot(n, g, v), d = ot(l, h, u)), c.has(l[h])) if (c.has(l[u])) {
-      const E = d.get(n[g]), ve = E !== void 0 ? o[E] : null;
-      if (ve === null) {
+      const E = d.get(n[g]), we = E !== void 0 ? o[E] : null;
+      if (we === null) {
         const Fe = G(s, o[h]);
         C(Fe, r[g]), a[g] = Fe;
-      } else a[g] = C(ve, r[g]), G(s, o[h], ve), o[E] = null;
+      } else a[g] = C(we, r[g]), G(s, o[h], we), o[E] = null;
       g++;
-    } else ye(o[u]), u--;
-    else ye(o[h]), h++;
+    } else _e(o[u]), u--;
+    else _e(o[h]), h++;
     for (; g <= v; ) {
       const E = G(s, a[v + 1]);
       C(E, r[g]), a[g++] = E;
     }
     for (; h <= u; ) {
       const E = o[h++];
-      E !== null && ye(E);
+      E !== null && _e(E);
     }
     return this.ut = n, Rt(s, a), O;
   }
@@ -1224,7 +1224,7 @@ async function Ys(s) {
     }), i.addEventListener("error", () => t(i.error ?? new Error("Blob read failed"))), i.readAsArrayBuffer(s);
   });
 }
-const _e = 8, xe = 40, dt = 180, R = 0.5, Qs = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " ", "Spacebar"]);
+const xe = 8, Se = 40, dt = 180, R = 0.5, Qs = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " ", "Spacebar"]);
 class Zs {
   constructor(e) {
     this.items = [], this.mode = "following-bottom", this.snapshot = {
@@ -1243,7 +1243,7 @@ class Zs {
     }, this.handleScroll = () => {
       this.pointerActive && !this.programmaticScroll && this.releaseForUser();
       const t = this.viewport;
-      t && !this.programmaticScroll && this.mode === "free-scrolling" && this.distanceToEnd(t) <= _e && (this.activeAnchorId = void 0, this.setTailHeight(0), this.newItemCount = 0, this.mode = "following-bottom", this.commitModeAttribute()), this.updateSnapshot();
+      t && !this.programmaticScroll && this.mode === "free-scrolling" && this.distanceToEnd(t) <= xe && (this.activeAnchorId = void 0, this.setTailHeight(0), this.newItemCount = 0, this.mode = "following-bottom", this.commitModeAttribute()), this.updateSnapshot();
     }, this.handleWindowResize = () => this.scheduleCommit(), this.host = e, e.addController(this);
   }
   hostUpdate() {
@@ -1282,7 +1282,7 @@ class Zs {
     const i = this.viewport, o = this.findRow(e);
     if (!i || !o || !this.hasLayout()) return !1;
     this.activeAnchorId = void 0, this.setTailHeight(0), this.newItemCount = 0, this.clearSettlingTimer(), this.mode = "free-scrolling", this.commitModeAttribute();
-    const r = i.getBoundingClientRect(), n = o.getBoundingClientRect(), l = i.scrollTop + n.top - r.top - xe;
+    const r = i.getBoundingClientRect(), n = o.getBoundingClientRect(), l = i.scrollTop + n.top - r.top - Se;
     return this.performScroll(Math.max(0, l), this.normalizeBehavior(t.behavior ?? "auto")), this.updateSnapshot(), !0;
   }
   disconnect() {
@@ -1337,7 +1337,7 @@ class Zs {
         this.activeAnchorId = void 0, this.mode = "following-bottom", this.commitModeAttribute(), this.performScroll(Math.max(0, this.viewport.scrollHeight - this.viewport.clientHeight), "auto");
       else {
         const o = this.viewport.getBoundingClientRect(), r = e.getBoundingClientRect();
-        Math.abs(r.top - o.top - xe) > R && this.performScroll(t, "auto");
+        Math.abs(r.top - o.top - Se) > R && this.performScroll(t, "auto");
       }
     else i <= R && (this.activeAnchorId = void 0);
   }
@@ -1351,7 +1351,7 @@ class Zs {
     const t = this.viewport;
     if (!t) return 0;
     const i = t.getBoundingClientRect(), o = e.getBoundingClientRect();
-    return Math.max(0, t.scrollTop + o.top - i.top - xe);
+    return Math.max(0, t.scrollTop + o.top - i.top - Se);
   }
   restoreLayoutAnchor(e) {
     const t = this.viewport, i = this.findRow(e.id);
@@ -1403,8 +1403,8 @@ class Zs {
   updateSnapshot() {
     const e = this.viewport, t = e ? {
       mode: this.mode,
-      canScrollStart: e.scrollTop > _e,
-      canScrollEnd: this.distanceToEnd(e) > _e,
+      canScrollStart: e.scrollTop > xe,
+      canScrollEnd: this.distanceToEnd(e) > xe,
       newItemCount: this.newItemCount
     } : {
       mode: this.mode,
@@ -1849,7 +1849,7 @@ function He(s) {
 function ue(s) {
   return He(s);
 }
-const Ie = /* @__PURE__ */ new Set([
+const ke = /* @__PURE__ */ new Set([
   "missing_openai_config",
   "model_error",
   "empty_model_response",
@@ -1887,9 +1887,9 @@ function xi(s, e) {
   return t.schema_version === "site_widget.v2" ? Ai(t, s, e) : Si(t, s, e);
 }
 function Si(s, e, t) {
-  $(s, li, "root"), s.ok !== !0 && f("ok"), s.schema_version !== "site_widget.v1" && f("schema_version");
+  $(s, li, "root"), s.ok !== !0 && b("ok"), s.schema_version !== "site_widget.v1" && b("schema_version");
   const i = Lt(s.status);
-  s.action !== "show_widget_saved" && f("action");
+  s.action !== "show_widget_saved" && b("action");
   const o = F(s.public_session_id, "public_session_id"), r = F(s.public_message_id, "public_message_id"), n = k(s.message_to_user, "message_to_user"), l = ee(s.automation, "automation"), a = k(l.status, "automation.status"), c = {
     source: "server",
     acceptanceStatus: i,
@@ -1899,14 +1899,14 @@ function Si(s, e, t) {
     raw: e
   };
   if (a === "replied") {
-    $(l, di, "automation"), l.next_step !== "ai_reply_shown" && f("automation.next_step"), l.conversation_state !== void 0 && z(l.conversation_state, ["ai_active", "manager_pending"]);
+    $(l, di, "automation"), l.next_step !== "ai_reply_shown" && b("automation.next_step"), l.conversation_state !== void 0 && z(l.conversation_state, ["ai_active", "manager_pending"]);
     const d = ee(l.disclosure, "automation.disclosure");
-    $(d, mi, "automation.disclosure"), d.shown !== !0 && f("automation.disclosure.shown"), Se(d.version, "automation.disclosure.version", 120);
-    const h = Se(d.text, "automation.disclosure.text", 1e3), u = ee(l.reply, "automation.reply");
+    $(d, mi, "automation.disclosure"), d.shown !== !0 && b("automation.disclosure.shown"), Ae(d.version, "automation.disclosure.version", 120);
+    const h = Ae(d.text, "automation.disclosure.text", 1e3), u = ee(l.reply, "automation.reply");
     $(u, gi, "automation.reply");
     const g = F(u.public_message_id, "automation.reply.public_message_id");
-    g === r && f("automation.reply.public_message_id_identity"), u.sender_role !== "ai_assistant" && f("automation.reply.sender_role");
-    const v = Se(u.text, "automation.reply.text", 1e3);
+    g === r && b("automation.reply.public_message_id_identity"), u.sender_role !== "ai_assistant" && b("automation.reply.sender_role");
+    const v = Ae(u.text, "automation.reply.text", 1e3);
     return {
       ...c,
       status: "replied",
@@ -1916,9 +1916,9 @@ function Si(s, e, t) {
     };
   }
   if (a === "degraded") {
-    $(l, hi, "automation"), l.next_step !== "retry_available" && f("automation.next_step"), z(l.conversation_state, ["ai_active"]);
+    $(l, hi, "automation"), l.next_step !== "retry_available" && b("automation.next_step"), z(l.conversation_state, ["ai_active"]);
     const d = k(l.reason, "automation.reason");
-    return Ie.has(d) || f("automation.reason"), {
+    return ke.has(d) || b("automation.reason"), {
       ...c,
       status: "fallback",
       systemText: n.trim() || t.fallbackMessage,
@@ -1926,9 +1926,9 @@ function Si(s, e, t) {
     };
   }
   if (a === "fallback") {
-    $(l, ui, "automation"), l.next_step !== "manager_review" && f("automation.next_step");
+    $(l, ui, "automation"), l.next_step !== "manager_review" && b("automation.next_step");
     const d = k(l.reason, "automation.reason");
-    return Ie.has(d) || f("automation.reason"), {
+    return ke.has(d) || b("automation.reason"), {
       ...c,
       status: "fallback",
       systemText: n.trim() || t.fallbackMessage,
@@ -1936,17 +1936,17 @@ function Si(s, e, t) {
     };
   }
   if (a === "disabled")
-    return $(l, pi, "automation"), l.next_step !== "manager_review" && f("automation.next_step"), {
+    return $(l, pi, "automation"), l.next_step !== "manager_review" && b("automation.next_step"), {
       ...c,
       status: "disabled",
       systemText: n.trim() || t.disabledMessage
     };
-  f("automation.status");
+  b("automation.status");
 }
 function Ai(s, e, t) {
-  $(s, fi, "root"), s.ok !== !0 && f("ok", "site_widget.v2");
+  $(s, fi, "root"), s.ok !== !0 && b("ok", "site_widget.v2");
   const i = Lt(s.status);
-  s.action !== "show_widget_saved" && f("action", "site_widget.v2");
+  s.action !== "show_widget_saved" && b("action", "site_widget.v2");
   const o = F(s.public_session_id, "public_session_id", "site_widget.v2"), r = F(
     s.public_conversation_id,
     "public_conversation_id",
@@ -1962,21 +1962,21 @@ function Ai(s, e, t) {
     raw: e
   };
   if (d === "processing")
-    return $(c, bi, "automation"), c.next_step !== "poll_history" && f("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["ai_active"]), {
+    return $(c, bi, "automation"), c.next_step !== "poll_history" && b("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["ai_active"]), {
       ...h,
       status: "processing",
       pollAfterMs: Ei(c.poll_after_ms, "automation.poll_after_ms", 250, 5e3)
     };
   if (d === "replied")
-    return $(c, wi, "automation"), c.next_step !== "history_available" && f("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["ai_active", "manager_pending"]), { ...h, status: "processing", pollAfterMs: 0 };
+    return $(c, wi, "automation"), c.next_step !== "history_available" && b("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["ai_active", "manager_pending"]), { ...h, status: "processing", pollAfterMs: 0 };
   if (d === "disabled")
-    return $(c, vi, "automation"), c.next_step !== "manager_review" && f("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["manager_pending"]), {
+    return $(c, vi, "automation"), c.next_step !== "manager_review" && b("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["manager_pending"]), {
       ...h,
       status: "disabled",
       systemText: a.trim() || t.disabledMessage
     };
   if (d === "degraded") {
-    $(c, yi, "automation"), c.next_step !== "retry_or_manager" && f("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["ai_active"]);
+    $(c, yi, "automation"), c.next_step !== "retry_or_manager" && b("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["ai_active"]);
     const u = gt(c.reason, "site_widget.v2");
     return {
       ...h,
@@ -1986,7 +1986,7 @@ function Ai(s, e, t) {
     };
   }
   if (d === "manager_pending") {
-    $(c, _i, "automation"), c.next_step !== "manager_review" && f("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["manager_pending", "manager_active"]);
+    $(c, _i, "automation"), c.next_step !== "manager_review" && b("automation.next_step", "site_widget.v2"), z(c.conversation_state, ["manager_pending", "manager_active"]);
     const u = gt(c.reason, "site_widget.v2");
     return {
       ...h,
@@ -1995,44 +1995,44 @@ function Ai(s, e, t) {
       reason: u
     };
   }
-  f("automation.status", "site_widget.v2");
+  b("automation.status", "site_widget.v2");
 }
 function Lt(s) {
-  return s === "accepted" || s === "replayed" ? s : f("status");
+  return s === "accepted" || s === "replayed" ? s : b("status");
 }
 function z(s, e) {
   const t = k(s, "automation.conversation_state");
-  return e.includes(t) || f("automation.conversation_state"), t;
+  return e.includes(t) || b("automation.conversation_state"), t;
 }
 function F(s, e, t = "site_widget.v1") {
-  return He(s) ?? f(e, t);
+  return He(s) ?? b(e, t);
 }
 function ee(s, e) {
-  return typeof s == "object" && s !== null && !Array.isArray(s) ? s : f(e);
+  return typeof s == "object" && s !== null && !Array.isArray(s) ? s : b(e);
 }
 function $(s, e, t) {
   const i = new Set(e), o = Object.keys(s).find((r) => !i.has(r));
-  o && f(`${t}.${o}`);
+  o && b(`${t}.${o}`);
 }
 function k(s, e) {
-  return typeof s == "string" ? s : f(e);
+  return typeof s == "string" ? s : b(e);
 }
-function Se(s, e, t) {
+function Ae(s, e, t) {
   const i = k(s, e);
-  return i.length > t && f(e), i.trim() || f(e);
+  return i.length > t && b(e), i.trim() || b(e);
 }
 function $i(s, e, t) {
   const i = k(s, e);
-  return (!i || !Number.isFinite(Date.parse(i))) && f(e, t), i;
+  return (!i || !Number.isFinite(Date.parse(i))) && b(e, t), i;
 }
 function Ei(s, e, t, i) {
-  return (typeof s != "number" || !Number.isInteger(s) || s < t || s > i) && f(e, "site_widget.v2"), s;
+  return (typeof s != "number" || !Number.isInteger(s) || s < t || s > i) && b(e, "site_widget.v2"), s;
 }
 function gt(s, e) {
   const t = k(s, "automation.reason");
-  return Ie.has(t) || f("automation.reason", e), t;
+  return ke.has(t) || b("automation.reason", e), t;
 }
-function f(s, e = "site_widget.v1") {
+function b(s, e = "site_widget.v1") {
   throw new Error(`Invalid ${e} response: ${s}`);
 }
 const Mi = [
@@ -2053,9 +2053,9 @@ const Mi = [
   "automation"
 ], ki = ["kind", "label", "title", "href", "entity_id"], Ti = ["status", "reason"], Pi = /^\/catalog\.html\?section=[a-z0-9-]+&entity=ent_[a-f0-9]+#block-[a-z0-9-]+$/;
 function Ci(s) {
-  const e = fe(s, "root");
-  be(e, Mi, "root"), e.ok !== !0 && y("ok"), e.schema_version !== "site_widget.history.v2" && y("schema_version");
-  const t = ke(e.public_session_id, "public_session_id"), i = ke(
+  const e = be(s, "root");
+  ve(e, Mi, "root"), e.ok !== !0 && y("ok"), e.schema_version !== "site_widget.history.v2" && y("schema_version");
+  const t = Te(e.public_session_id, "public_session_id"), i = Te(
     e.public_conversation_id,
     "public_conversation_id"
   ), o = Ui(e.conversation_state), r = e.poll_after_ms === void 0 ? void 0 : Bi(e.poll_after_ms, "poll_after_ms", 250, 5e3);
@@ -2073,11 +2073,11 @@ function Ci(s) {
   };
 }
 function Ri(s, e) {
-  const t = `messages.${e}`, i = fe(s, t);
-  be(i, Ii, t);
+  const t = `messages.${e}`, i = be(s, t);
+  ve(i, Ii, t);
   const o = i.sender_role;
   return o !== "visitor" && o !== "ai_assistant" && o !== "manager" && y(`${t}.sender_role`), i.delivery_state !== "accepted" && y(`${t}.delivery_state`), {
-    publicMessageId: ke(i.public_message_id, `${t}.public_message_id`),
+    publicMessageId: Te(i.public_message_id, `${t}.public_message_id`),
     senderRole: o,
     text: N(i.text, `${t}.text`, 4e3),
     submittedAt: Oi(i.submitted_at, `${t}.submitted_at`),
@@ -2088,8 +2088,8 @@ function Ri(s, e) {
 }
 function zi(s, e) {
   return s === void 0 ? [] : ((!Array.isArray(s) || s.length > 8) && y(`${e}.catalog_references`), s.map((t, i) => {
-    const o = `${e}.catalog_references.${i}`, r = fe(t, o);
-    be(r, ki, o), r.kind !== "catalog_item" && y(`${o}.kind`);
+    const o = `${e}.catalog_references.${i}`, r = be(t, o);
+    ve(r, ki, o), r.kind !== "catalog_item" && y(`${o}.kind`);
     const n = N(r.href, `${o}.href`, 2048);
     Pi.test(n) || y(`${o}.href`);
     const l = N(r.entity_id, `${o}.entity_id`, 80);
@@ -2103,8 +2103,8 @@ function zi(s, e) {
   }));
 }
 function Li(s, e) {
-  const t = fe(s, e);
-  be(t, Ti, e);
+  const t = be(s, e);
+  ve(t, Ti, e);
   const i = t.status;
   i !== "pending" && i !== "processing" && i !== "retrying" && i !== "replied" && i !== "degraded" && i !== "blocked" && i !== "failed" && y(`${e}.status`);
   const o = t.reason === void 0 ? void 0 : N(t.reason, `${e}.reason`, 120);
@@ -2113,14 +2113,14 @@ function Li(s, e) {
 function Ui(s) {
   return s === "ai_active" || s === "manager_pending" || s === "manager_active" || s === "closed" ? s : y("conversation_state");
 }
-function fe(s, e) {
+function be(s, e) {
   return typeof s == "object" && s !== null && !Array.isArray(s) ? s : y(e);
 }
-function be(s, e, t) {
+function ve(s, e, t) {
   const i = new Set(e), o = Object.keys(s).find((r) => !i.has(r));
   o && y(`${t}.${o}`);
 }
-function ke(s, e) {
+function Te(s, e) {
   return He(s) ?? y(e);
 }
 function N(s, e, t) {
@@ -2241,7 +2241,7 @@ function ft(s, e = "local") {
   let n = "", l, a;
   return {
     getPublicSessionId() {
-      const c = Ae(r, t), d = ue(c || n);
+      const c = $e(r, t), d = ue(c || n);
       return d ? (n = d, c && c !== d && ae(r, t, d), d) : (n = "", c && bt(r, t), "");
     },
     setPublicSessionId(c) {
@@ -2252,14 +2252,14 @@ function ft(s, e = "local") {
       n = "", bt(r, t);
     },
     getOpenState() {
-      const c = Ae(r, i);
+      const c = $e(r, i);
       return c === "open" ? !0 : c === "closed" ? !1 : l;
     },
     setOpenState(c) {
       l = c, ae(r, i, c ? "open" : "closed");
     },
     getPanelSize() {
-      const c = Ae(r, o);
+      const c = $e(r, o);
       return Fi(c) ? c : a;
     },
     setPanelSize(c) {
@@ -2277,7 +2277,7 @@ function ji() {
     return;
   }
 }
-function Ae(s, e) {
+function $e(s, e) {
   try {
     return s?.getItem(e) || void 0;
   } catch {
@@ -2448,10 +2448,11 @@ const Ki = At`
     gap: 5px;
   }
 
-  .message-status__spinner {
-    animation: message-spinner 900ms linear infinite;
+  .message-status__checks {
+    color: var(--sw-color-accent);
     display: inline-flex;
-    margin-right: 5px;
+    font-weight: 700;
+    letter-spacing: -2px;
   }
 
   .message-actions .retry-button {
@@ -2553,12 +2554,6 @@ const Ki = At`
 
   .typing__dots i:nth-child(3) {
     animation-delay: 280ms;
-  }
-
-  @keyframes message-spinner {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   @keyframes typing-pulse {
@@ -3407,59 +3402,59 @@ const Ki = At`
     }
   }
 `;
-function _(s, e = 22) {
+function S(s, e = 22) {
   const t = {
     width: e,
     height: e
   };
   switch (s) {
     case "send":
-      return A(t, S`<path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />`);
+      return A(t, x`<path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />`);
     case "phone":
       return A(
         t,
-        S`<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.35 1.77.7 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.84.35 1.71.58 2.61.7A2 2 0 0 1 22 16.92Z" />`
+        x`<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.35 1.77.7 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.84.35 1.71.58 2.61.7A2 2 0 0 1 22 16.92Z" />`
       );
     case "calculator":
       return A(
         t,
-        S`<rect x="4" y="2" width="16" height="20" rx="2" /><path d="M8 6h8" /><path d="M16 14v4" /><path d="M8 10h.01" /><path d="M12 10h.01" /><path d="M16 10h.01" /><path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M8 18h.01" /><path d="M12 18h.01" />`
+        x`<rect x="4" y="2" width="16" height="20" rx="2" /><path d="M8 6h8" /><path d="M16 14v4" /><path d="M8 10h.01" /><path d="M12 10h.01" /><path d="M16 10h.01" /><path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M8 18h.01" /><path d="M12 18h.01" />`
       );
     case "close":
-      return A(t, S`<path d="M18 6 6 18" /><path d="m6 6 12 12" />`);
+      return A(t, x`<path d="M18 6 6 18" /><path d="m6 6 12 12" />`);
     case "minus":
-      return A(t, S`<path d="M5 12h14" />`);
+      return A(t, x`<path d="M5 12h14" />`);
     case "paperclip":
-      return A(t, S`<path d="m16 6-8.41 8.59a2 2 0 0 0 2.82 2.82l8.42-8.58a4 4 0 1 0-5.66-5.66l-8.38 8.55a6 6 0 1 0 8.49 8.49l8.38-8.55" />`);
+      return A(t, x`<path d="m16 6-8.41 8.59a2 2 0 0 0 2.82 2.82l8.42-8.58a4 4 0 1 0-5.66-5.66l-8.38 8.55a6 6 0 1 0 8.49 8.49l8.38-8.55" />`);
     case "shield":
       return A(
         t,
-        S`<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.68 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1Z" /><path d="m9 12 2 2 4-4" />`
+        x`<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.68 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1Z" /><path d="m9 12 2 2 4-4" />`
       );
     case "brand":
-      return A(t, S`<path d="m8 3 4 8 5-5 5 15H2Z" />`);
+      return A(t, x`<path d="m8 3 4 8 5-5 5 15H2Z" />`);
     case "plus":
-      return A(t, S`<path d="M5 12h14" /><path d="M12 5v14" />`);
+      return A(t, x`<path d="M5 12h14" /><path d="M12 5v14" />`);
     case "maximize-2":
     case "expand":
-      return A(t, S`<path d="M15 3h6v6" /><path d="m21 3-7 7" /><path d="m3 21 7-7" /><path d="M9 21H3v-6" />`);
+      return A(t, x`<path d="M15 3h6v6" /><path d="m21 3-7 7" /><path d="m3 21 7-7" /><path d="M9 21H3v-6" />`);
     case "minimize-2":
     case "shrink":
-      return A(t, S`<path d="M4 14h6v6" /><path d="M20 10h-6V4" /><path d="m14 10 7-7" /><path d="m3 21 7-7" />`);
+      return A(t, x`<path d="M4 14h6v6" /><path d="M20 10h-6V4" /><path d="m14 10 7-7" /><path d="m3 21 7-7" />`);
     case "spark":
       return A(
         t,
-        S`<path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0Z" /><path d="M20 3v4" /><path d="M22 5h-4" /><path d="M4 17v2" /><path d="M5 18H3" />`
+        x`<path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0Z" /><path d="M20 3v4" /><path d="M22 5h-4" /><path d="M4 17v2" /><path d="M5 18H3" />`
       );
     case "loader":
-      return A(t, S`<path d="M21 12a9 9 0 1 1-2.64-6.36" />`);
+      return A(t, x`<path d="M21 12a9 9 0 1 1-2.64-6.36" />`);
     case "message":
     default:
-      return A(t, S`<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /><path d="M8 12h.01" /><path d="M12 12h.01" /><path d="M16 12h.01" />`);
+      return A(t, x`<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /><path d="M8 12h.01" /><path d="M12 12h.01" /><path d="M16 12h.01" />`);
   }
 }
 function A(s, e) {
-  return S`<svg
+  return x`<svg
     aria-hidden="true"
     width=${s.width}
     height=${s.height}
@@ -3496,7 +3491,7 @@ function Yi({
   onFilesSelected: t
 }) {
   const i = s.trim() || vt;
-  return b`
+  return f`
     <button
       class="attach-button"
       part="attach-button"
@@ -3506,7 +3501,7 @@ function Yi({
       ?disabled=${e}
       @click=${Ji}
     >
-      ${_("paperclip")}
+      ${S("paperclip")}
     </button>
     <input
       class="attachment-input"
@@ -3526,21 +3521,21 @@ function Qi({
   onRemove: i
 }) {
   const o = e.trim();
-  return b`
+  return f`
     ${o ? Vi(
     t,
-    b`<p class="attachment-validation" role="alert" data-validation-revision=${t}>
+    f`<p class="attachment-validation" role="alert" data-validation-revision=${t}>
             ${o}
           </p>`
   ) : p}
     <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
       ${eo(s.length)}
     </span>
-    ${s.length > 0 ? b`
+    ${s.length > 0 ? f`
           <ul class="attachment-list" part="attachment-list" aria-label="Выбранные фото">
             ${s.map((r, n) => {
     const l = n + 1;
-    return b`
+    return f`
                 <li class="attachment" part="attachment">
                   <img
                     class="attachment__preview"
@@ -3563,7 +3558,7 @@ function Qi({
                     aria-label=${`Удалить фото ${l}`}
                     @click=${() => i(r.id)}
                   >
-                    ${_("close", 18)}
+                    ${S("close", 18)}
                   </button>
                 </li>
               `;
@@ -3573,10 +3568,10 @@ function Qi({
   `;
 }
 function Zi(s) {
-  return s.length === 0 ? p : b`
+  return s.length === 0 ? p : f`
     <ul class="message-attachments" part="attachment-list" aria-label="Фото в сообщении">
       ${s.map(
-    (e, t) => b`
+    (e, t) => f`
           <li class="message-attachment" part="attachment">
             <img
               class="message-attachment__preview"
@@ -3623,7 +3618,7 @@ function so(s, e) {
   return s.role === "system" ? ao(s) : io(s, e);
 }
 function io(s, e) {
-  return b`<div
+  return f`<div
     class=${`message-root message-root--${s.role}`}
     part="message-root"
     data-message-id=${s.id}
@@ -3635,11 +3630,11 @@ function io(s, e) {
   </div>`;
 }
 function oo(s, e) {
-  return b`<article class=${po(s)} part=${`message message-${s.role} message-bubble`}>
+  return f`<article class=${go(s)} part=${`message message-${s.role} message-bubble`}>
     <p class="message__text">${s.text}</p>
-    ${s.catalogReferences?.length ? b`<div class="message-links" part="message-links">
+    ${s.catalogReferences?.length ? f`<div class="message-links" part="message-links">
           ${s.catalogReferences.map(
-    (t) => b`<a
+    (t) => f`<a
               class="message-link"
               part="message-link"
               href=${t.href}
@@ -3655,27 +3650,30 @@ function oo(s, e) {
   </article>`;
 }
 function ro(s, e) {
-  const t = s.status === "pending" || s.status === "saved" || s.status === "error";
-  return s.localKind === "intro" && !s.disclosure && !t ? p : b`<div class="message-meta" part="message-meta">
-    ${s.disclosure ? b`<div class="message-disclosure" part="message-disclosure">
-          ${_("spark", 16)}
+  const t = s.status === "pending" || s.status === "saved" || s.status === "error", i = ho(s.createdAt), o = uo(s.createdAt);
+  return s.localKind === "intro" && !s.disclosure && !t ? p : f`<div class="message-meta" part="message-meta">
+    ${s.disclosure ? f`<div class="message-disclosure" part="message-disclosure">
+          ${S("spark", 16)}
           <span>${s.disclosureText ?? e.config.disclosureText}</span>
         </div>` : p}
-    <div class=${`message-status-row message-status-row--${s.status}`}>
-      <time class="message-time" datetime=${s.createdAt}>${ho(s.createdAt)}</time>
-      ${t ? b`
-          <span aria-hidden="true">·</span>
-          <span class="message-status" part="message-status">
-            ${s.status === "pending" ? b`<span class="message-status__spinner" aria-hidden="true">${_("loader", 14)}</span
-                  >Отправляем…` : s.status === "saved" ? "Принято" : "Не отправлено"}
-          </span>
-          ${no(s, e)}
-        ` : p}
-    </div>
+    ${i || t ? f`<div class=${`message-status-row message-status-row--${s.status}`}>
+          ${i ? f`<time class="message-time" datetime=${s.createdAt} aria-label=${o}
+                >${i}</time
+              >` : p}
+          ${t ? f`
+                ${i ? f`<span aria-hidden="true">·</span>` : p}
+                <span class="message-status" part="message-status">
+                  ${s.status === "pending" ? f`<span class="message-status__checks" aria-hidden="true">✓</span
+                        ><span>Отправлено</span>` : s.status === "saved" ? f`<span class="message-status__checks" aria-hidden="true">✓✓</span
+                          ><span>Принято</span>` : "Не отправлено"}
+                </span>
+                ${no(s, e)}
+              ` : p}
+        </div>` : p}
   </div>`;
 }
 function no(s, e) {
-  return s.status !== "error" ? p : b`<div class="message-actions" part="message-actions">
+  return s.status !== "error" ? p : f`<div class="message-actions" part="message-actions">
     <span aria-hidden="true">·</span>
     <button
       class="retry-button"
@@ -3688,36 +3686,50 @@ function no(s, e) {
   </div>`;
 }
 function ao(s) {
-  return b`<div
+  return f`<div
     class="marker"
     part="message message-system marker"
     role="status"
     data-message-id=${s.id}
     data-system-kind=${s.systemKind ?? "fallback"}
   >
-    <span class="marker__icon" part="marker-icon" aria-hidden="true">${_("shield", 16)}</span>
+    <span class="marker__icon" part="marker-icon" aria-hidden="true">${S("shield", 16)}</span>
     <span class="marker__text" part="marker-text">${s.text}</span>
   </div>`;
 }
 function co(s, e, t = /* @__PURE__ */ new Date()) {
   if (s.localKind === "intro") return p;
-  const i = Te(s.createdAt), o = e && e.localKind !== "intro" ? Te(e.createdAt) : void 0;
-  return !i || o && Pe(i, o) ? p : b`<div class="date-separator" part="date-separator" role="separator">
-    <span>${uo(i, t)}</span>
+  const i = me(s.createdAt), o = e && e.localKind !== "intro" ? me(e.createdAt) : void 0;
+  return !i || o && Pe(i, o) ? p : f`<div class="date-separator" part="date-separator" role="separator">
+    <span>${mo(i, t)}</span>
   </div>`;
 }
 function lo() {
-  return b`<div class="typing" part="typing-indicator" role="status" aria-label="AI-помощник печатает">
-    <span class="typing__avatar" aria-hidden="true">${_("spark", 16)}</span>
+  return f`<div class="typing" part="typing-indicator" role="status" aria-label="AI-помощник печатает">
+    <span class="typing__avatar" aria-hidden="true">${S("spark", 16)}</span>
     <span class="typing__dots" aria-hidden="true"><i></i><i></i><i></i></span>
     <span class="visually-hidden">AI-помощник печатает</span>
   </div>`;
 }
 function ho(s) {
-  const e = Te(s);
+  const e = me(s);
   return e ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(e) : "";
 }
-function uo(s, e = /* @__PURE__ */ new Date()) {
+function uo(s) {
+  const e = me(s);
+  return e ? new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(e) : "";
+}
+function po(s = /* @__PURE__ */ new Date()) {
+  const e = new Date(s);
+  return e.setHours(24, 0, 0, 50), Math.max(50, e.getTime() - s.getTime());
+}
+function mo(s, e = /* @__PURE__ */ new Date()) {
   if (Pe(s, e)) return "Сегодня";
   const t = new Date(e);
   return t.setDate(t.getDate() - 1), Pe(s, t) ? "Вчера" : new Intl.DateTimeFormat("ru-RU", {
@@ -3726,18 +3738,18 @@ function uo(s, e = /* @__PURE__ */ new Date()) {
     year: s.getFullYear() === e.getFullYear() ? void 0 : "numeric"
   }).format(s);
 }
-function Te(s) {
+function me(s) {
   const e = new Date(s);
   return Number.isFinite(e.getTime()) ? e : void 0;
 }
 function Pe(s, e) {
   return s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth() && s.getDate() === e.getDate();
 }
-function po(s) {
+function go(s) {
   const e = ["message", `message--${s.role}`];
   return s.status === "error" && e.push("message--error"), e.join(" ");
 }
-const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["normal", "fullscreen"], fo = {
+const Bt = "granit-site-widget", fo = ["normal", "wide", "fullscreen"], bo = ["normal", "fullscreen"], vo = {
   normal: "обычный размер",
   wide: "широкий режим",
   fullscreen: "на весь экран"
@@ -3787,10 +3799,10 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
   }
   connectedCallback() {
     const e = this.hasBooted;
-    super.connectedCallback(), this.boot(), e && this.requestUpdate();
+    super.connectedCallback(), this.boot(), this.scheduleDateRollover(), e && this.requestUpdate();
   }
   disconnectedCallback() {
-    this.invalidateActiveWork(!0), super.disconnectedCallback();
+    this.invalidateActiveWork(!0), this.clearDateRolloverTimer(), super.disconnectedCallback();
   }
   attributeChangedCallback(e, t, i) {
     if (t === i || !this.hasBooted) return;
@@ -3816,8 +3828,8 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
     this.invalidateActiveWork(!1), this.imageAttachments.clearAll(), this.state = w(this.state, { type: "session.cleared" }, this.config), this.sessionStore?.clearPublicSessionId(), this.publicSessionId = this.sessionStore?.getPublicSessionId() ?? "", this.requestUpdate();
   }
   render() {
-    const e = ii(this.state, this.config), t = this.getEffectivePanelSize(), i = this.getPanelSizeButtonLabel(), o = t === "fullscreen" ? "minimize-2" : "maximize-2", r = this.messageScroller.getSnapshot(), n = this.isPhotoPreviewEnabled(), l = this.imageAttachments.isProcessing(), a = e.pending ? e.messages.find((d) => d.id === e.pending?.messageId) : void 0, c = a?.status === "error" ? this.config.errorMessage : a?.status === "pending" ? "Отправляем сообщение." : e.awaitingAi ? "Сообщение принято. AI-помощник печатает." : "";
-    return b`
+    const e = ii(this.state, this.config), t = this.getEffectivePanelSize(), i = this.getPanelSizeButtonLabel(), o = t === "fullscreen" ? "minimize-2" : "maximize-2", r = this.messageScroller.getSnapshot(), n = this.isPhotoPreviewEnabled(), l = this.imageAttachments.isProcessing(), a = e.pending ? e.messages.find((d) => d.id === e.pending?.messageId) : void 0, c = a?.status === "error" ? this.config.errorMessage : a?.status === "pending" ? "Сообщение отправлено из браузера." : e.awaitingAi ? "Сообщение принято. AI-помощник печатает." : "";
+    return f`
       <button
         class="launcher"
         part="launcher"
@@ -3828,9 +3840,9 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
         ?hidden=${e.open}
         @click=${() => this.open()}
       >
-        <span part="launcher-icon" aria-hidden="true">${_("message")}</span>
+        <span part="launcher-icon" aria-hidden="true">${S("message")}</span>
         <span part="launcher-label">${this.config.launcherLabel}</span>
-        ${e.unreadCount > 0 ? b`<span class="launcher__badge" aria-label=${`${e.unreadCount} новых сообщений`}
+        ${e.unreadCount > 0 ? f`<span class="launcher__badge" aria-label=${`${e.unreadCount} новых сообщений`}
               >${e.unreadCount}</span
             >` : p}
       </button>
@@ -3849,7 +3861,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
         @keydown=${this.handlePanelKeydown}
       >
         <header class="header" part="header">
-          <div class="brand-mark" part="brand-mark" aria-hidden="true">${_("brand", 24)}</div>
+          <div class="brand-mark" part="brand-mark" aria-hidden="true">${S("brand", 24)}</div>
           <div>
             <h2 id=${this.titleId} class="title" part="title">${this.config.headerTitle}</h2>
             <div class="status" part="status">
@@ -3868,7 +3880,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
               title=${i}
               @click=${this.cyclePanelSize}
             >
-              ${_(o)}
+              ${S(o)}
             </button>
             <button
               class="icon-button"
@@ -3877,7 +3889,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
               aria-label=${this.config.minimizeLabel}
               @click=${() => this.close()}
             >
-              ${_("minus")}
+              ${S("minus")}
             </button>
             <button
               class="icon-button"
@@ -3886,7 +3898,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
               aria-label=${this.config.closeLabel}
               @click=${() => this.close()}
             >
-              ${_("close")}
+              ${S("close")}
             </button>
           </div>
         </header>
@@ -3911,7 +3923,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
                 ${Rs(
       e.messages,
       (d) => d.id,
-      (d, h) => b`
+      (d, h) => f`
                     ${co(d, h > 0 ? e.messages[h - 1] : void 0)}
                     <div
                       class="message-scroller__item"
@@ -3930,7 +3942,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
                 <div class="message-scroller__tail" aria-hidden="true"></div>
               </div>
             </div>
-            ${r.canScrollEnd ? b`<button
+            ${r.canScrollEnd ? f`<button
                   class="jump-latest"
                   part="jump-latest"
                   type="button"
@@ -3940,9 +3952,9 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
                 </button>` : p}
           </div>
 
-          ${e.showQuickReplies ? b`<div class="quick-replies" part="quick-replies">
+          ${e.showQuickReplies ? f`<div class="quick-replies" part="quick-replies">
                 ${this.config.quickReplies.map(
-      (d) => b`<button
+      (d) => f`<button
                     class="quick-reply"
                     part="quick-reply"
                     type="button"
@@ -3994,11 +4006,11 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
               aria-label=${this.config.sendLabel}
               ?disabled=${!e.canSend || l}
             >
-              ${_("send")}
+              ${S("send")}
             </button>
           </form>
 
-          ${e.showContactTrigger ? b`<div class="contact-row" part="contact-row">
+          ${e.showContactTrigger ? f`<div class="contact-row" part="contact-row">
                 <button
                   class="contact-trigger"
                   part="phone-trigger"
@@ -4007,7 +4019,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
                   aria-controls=${this.phoneCaptureId}
                   @click=${this.toggleContactCapture}
                 >
-                  ${_("plus", 18)}
+                  ${S("plus", 18)}
                   <span>${e.contactLabel}</span>
                 </button>
               </div>
@@ -4033,7 +4045,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
               </div>` : p}
 
           <div class="footer-note" part="footer-note">
-            <span aria-hidden="true">${_("shield", 18)}</span>
+            <span aria-hidden="true">${S("shield", 18)}</span>
             <span>${this.config.footerNote}</span>
           </div>
           <div class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">${c}</div>
@@ -4062,8 +4074,16 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
   persistOpenState(e) {
     this.config.persistOpenState && this.sessionStore?.setOpenState(e);
   }
+  scheduleDateRollover() {
+    this.clearDateRolloverTimer(), this.dateRolloverTimer = globalThis.setTimeout(() => {
+      this.dateRolloverTimer = void 0, this.isConnected && (this.requestUpdate(), this.scheduleDateRollover());
+    }, po());
+  }
+  clearDateRolloverTimer() {
+    this.dateRolloverTimer !== void 0 && (globalThis.clearTimeout(this.dateRolloverTimer), this.dateRolloverTimer = void 0);
+  }
   getPanelSizeButtonLabel() {
-    return `${this.config.resizeLabel}: ${fo[this.getNextPanelSize()]}`;
+    return `${this.config.resizeLabel}: ${vo[this.getNextPanelSize()]}`;
   }
   getNextPanelSize() {
     const e = this.getPanelSizeOrder(), t = e.includes(this.panelSize) ? this.panelSize : "normal", i = e.indexOf(t);
@@ -4073,7 +4093,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
     return this.isMobileViewport() && this.panelSize === "wide" ? "normal" : this.panelSize;
   }
   getPanelSizeOrder() {
-    return this.isMobileViewport() ? go : mo;
+    return this.isMobileViewport() ? bo : fo;
   }
   isMobileViewport() {
     return typeof window < "u" && typeof window.matchMedia == "function" && window.matchMedia("(max-width: 767px)").matches;
@@ -4082,13 +4102,13 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
     M(this, "action-clicked", this.config, { actionType: "quick-reply" }), this.state = w(this.state, { type: "draft.changed", value: e }, this.config), this.requestUpdate(), this.config.quickReplySubmit === "auto" ? this.submitDraft() : this.focusInputSoon();
   }
   renderMobileActions(e) {
-    return e ? b`<nav class="mobile-actions" part="mobile-actions" aria-label="Быстрые действия">
+    return e ? f`<nav class="mobile-actions" part="mobile-actions" aria-label="Быстрые действия">
       ${this.config.mobileActions.map((t) => this.renderMobileAction(t))}
     </nav>` : p;
   }
   renderMobileAction(e) {
     const t = e.icon ?? e.type;
-    return e.type === "call" || e.type === "link" ? b`<a
+    return e.type === "call" || e.type === "link" ? f`<a
         class="mobile-action"
         part="mobile-action"
         href=${e.href}
@@ -4096,15 +4116,15 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
         rel=${e.type === "link" && e.target !== "_self" ? "noopener noreferrer" : ""}
         @click=${() => M(this, "action-clicked", this.config, { actionType: e.type })}
       >
-        ${_(t, 20)}
+        ${S(t, 20)}
         <span>${e.label}</span>
-      </a>` : b`<button
+      </a>` : f`<button
       class="mobile-action"
       part="mobile-action"
       type="button"
       @click=${() => this.handleMobileAction(e)}
     >
-      ${_(t, 20)}
+      ${S(t, 20)}
       <span>${e.label}</span>
     </button>`;
   }
@@ -4223,7 +4243,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
     let o = Math.max(0, i), r = 0;
     for (; e === this.historyEpoch && this.historyAbortController === t && !t.signal.aborted && this.isConnected; )
       try {
-        o > 0 && await bo(o, t.signal);
+        o > 0 && await wo(o, t.signal);
         const n = await qi(
           this.config,
           this.publicSessionId,
@@ -4292,7 +4312,7 @@ const Bt = "granit-site-widget", mo = ["normal", "wide", "fullscreen"], go = ["n
 };
 Ne.styles = [Wi, Ki];
 let Ce = Ne;
-function bo(s, e) {
+function wo(s, e) {
   return e.aborted ? Promise.reject(new DOMException("Aborted", "AbortError")) : new Promise((t, i) => {
     const o = globalThis.setTimeout(n, Math.max(0, s)), r = () => {
       globalThis.clearTimeout(o), e.removeEventListener("abort", r), i(new DOMException("Aborted", "AbortError"));
@@ -4303,13 +4323,13 @@ function bo(s, e) {
     e.addEventListener("abort", r, { once: !0 });
   });
 }
-function vo(s = Bt) {
+function yo(s = Bt) {
   typeof window > "u" || !window.customElements || window.customElements.get(s) || window.customElements.define(s, Ce);
 }
-function So(s = {}) {
+function $o(s = {}) {
   if (typeof document > "u")
     throw new Error("mountSiteWidget requires a browser document");
-  vo();
+  yo();
   const e = document.createElement(Bt);
   Yt(e, s);
   const t = s.target ?? document.body;
@@ -4319,7 +4339,7 @@ function So(s = {}) {
 export {
   Ce as GranitSiteWidgetElement,
   Bt as SITE_WIDGET_TAG_NAME,
-  vo as defineSiteWidget,
-  So as mountSiteWidget
+  yo as defineSiteWidget,
+  $o as mountSiteWidget
 };
 //# sourceMappingURL=index.js.map

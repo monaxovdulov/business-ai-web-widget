@@ -146,6 +146,8 @@ test("v2 показывает accepted и typing, затем время и бе�
   const visitor = widget(page).locator(".message-root--visitor");
   await expect(visitor).toHaveAttribute("data-message-status", "saved");
   await expect(visitor.locator(".message-status")).toContainText("Принято");
+  await expect(visitor.locator(".message-status__checks")).toHaveText("✓✓");
+  await expect(visitor.locator(".message-status__spinner")).toHaveCount(0);
   await expect(widget(page).locator('[part~="typing-indicator"]')).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Напишите сообщение..." })).toBeEnabled();
   await saveScreenshot(page, "v2-typing-desktop");
@@ -203,7 +205,7 @@ test("deferred response показывает pending bubble и отдельны�
           '.message-root--visitor[data-message-status="pending"] .message__text'
         );
         const sendingStatus = shadow?.querySelector('.message-root--visitor .message-status');
-        if (!pendingBubble || !sendingStatus?.textContent?.includes("Отправляем")) return;
+        if (!pendingBubble || !sendingStatus?.textContent?.includes("Отправлено")) return;
         observer.disconnect();
         window.clearTimeout(timeoutId);
         resolve(performance.now() - startedAt);
@@ -222,7 +224,9 @@ test("deferred response показывает pending bubble и отдельны�
   expect(pendingElapsedMs).toBeLessThanOrEqual(300);
   const visitorRoot = widget(page).locator(".message-root--visitor");
   await expect(visitorRoot).toHaveAttribute("data-message-status", "pending");
-  await expect(visitorRoot.locator(".message-status")).toContainText("Отправляем");
+  await expect(visitorRoot.locator(".message-status")).toContainText("Отправлено");
+  await expect(visitorRoot.locator(".message-status__checks")).toHaveText("✓");
+  await expect(visitorRoot.locator(".message-status__spinner")).toHaveCount(0);
 
   releaseResponse();
   await expect(visitorRoot).toHaveAttribute("data-message-status", "saved");

@@ -20,7 +20,12 @@ import { buildWidgetViewModel } from "../src/domain/view-model";
 import { emitSiteWidgetEvent } from "../src/events/widget-events";
 import { sendSiteWidgetMessage } from "../src/services/intake-client";
 import { createSessionStore } from "../src/services/session-store";
-import { formatDateLabel, formatMessageTime } from "../src/components/widget-message";
+import {
+  formatDateLabel,
+  formatMessageDateTime,
+  formatMessageTime,
+  millisecondsUntilNextLocalDay
+} from "../src/components/widget-message";
 import {
   disabledReceipt,
   degradedReceipt,
@@ -287,6 +292,16 @@ describe("site widget domain", () => {
         new Date("2026-07-22T20:00:00.000Z")
       )
     ).toBe("Вчера");
+    expect(
+      formatDateLabel(
+        new Date("2025-12-31T10:00:00.000Z"),
+        new Date("2026-01-02T20:00:00.000Z")
+      )
+    ).toMatch(/2025/u);
+    expect(formatMessageDateTime("2026-07-22T19:05:00.000Z")).toMatch(/2026/u);
+    expect(formatMessageTime("not-a-date")).toBe("");
+    expect(formatMessageDateTime("not-a-date")).toBe("");
+    expect(millisecondsUntilNextLocalDay(new Date(2026, 6, 22, 23, 59, 59, 900))).toBe(150);
   });
 
   it("rejects responses that cannot prove root truth or persisted identities", () => {

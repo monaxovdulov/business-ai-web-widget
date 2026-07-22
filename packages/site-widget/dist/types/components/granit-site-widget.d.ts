@@ -13,6 +13,7 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private historyAbortController;
     private historyEpoch;
     private operationEpoch;
+    private dateRolloverTimer;
     private readonly messageScroller;
     private readonly imageAttachments;
     private sendMessageRequest;
@@ -31,6 +32,8 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private boot;
     private syncHostAttributes;
     private persistOpenState;
+    private scheduleDateRollover;
+    private clearDateRolloverTimer;
     private cyclePanelSize;
     private getPanelSizeButtonLabel;
     private getNextPanelSize;

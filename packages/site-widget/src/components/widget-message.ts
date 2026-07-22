@@ -54,6 +54,8 @@ export function renderMessageMeta(
   context: WidgetMessageRenderContext
 ): TemplateResult | typeof nothing {
   const hasStatus = message.status === "pending" || message.status === "saved" || message.status === "error";
+  const formattedTime = formatMessageTime(message.createdAt);
+  const accessibleTime = formatMessageDateTime(message.createdAt);
   if (message.localKind === "intro" && !message.disclosure && !hasStatus) return nothing;
 
   return html`<div class="message-meta" part="message-meta">
@@ -63,23 +65,30 @@ export function renderMessageMeta(
           <span>${message.disclosureText ?? context.config.disclosureText}</span>
         </div>`
       : nothing}
-    <div class=${`message-status-row message-status-row--${message.status}`}>
-      <time class="message-time" datetime=${message.createdAt}>${formatMessageTime(message.createdAt)}</time>
-      ${hasStatus
-        ? html`
-          <span aria-hidden="true">·</span>
-          <span class="message-status" part="message-status">
-            ${message.status === "pending"
-              ? html`<span class="message-status__spinner" aria-hidden="true">${widgetIcon("loader", 14)}</span
-                  >Отправляем…`
-              : message.status === "saved"
-                ? "Принято"
-                : "Не отправлено"}
-          </span>
-          ${renderMessageActions(message, context)}
-        `
-        : nothing}
-    </div>
+    ${formattedTime || hasStatus
+      ? html`<div class=${`message-status-row message-status-row--${message.status}`}>
+          ${formattedTime
+            ? html`<time class="message-time" datetime=${message.createdAt} aria-label=${accessibleTime}
+                >${formattedTime}</time
+              >`
+            : nothing}
+          ${hasStatus
+            ? html`
+                ${formattedTime ? html`<span aria-hidden="true">·</span>` : nothing}
+                <span class="message-status" part="message-status">
+                  ${message.status === "pending"
+                    ? html`<span class="message-status__checks" aria-hidden="true">✓</span
+                        ><span>Отправлено</span>`
+                    : message.status === "saved"
+                      ? html`<span class="message-status__checks" aria-hidden="true">✓✓</span
+                          ><span>Принято</span>`
+                      : "Не отправлено"}
+                </span>
+                ${renderMessageActions(message, context)}
+              `
+            : nothing}
+        </div>`
+      : nothing}
   </div>`;
 }
 
@@ -142,6 +151,25 @@ export function formatMessageTime(value: string): string {
   return date
     ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(date)
     : "";
+}
+
+export function formatMessageDateTime(value: string): string {
+  const date = validDate(value);
+  return date
+    ? new Intl.DateTimeFormat("ru-RU", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(date)
+    : "";
+}
+
+export function millisecondsUntilNextLocalDay(now = new Date()): number {
+  const nextDay = new Date(now);
+  nextDay.setHours(24, 0, 0, 50);
+  return Math.max(50, nextDay.getTime() - now.getTime());
 }
 
 export function formatDateLabel(date: Date, now = new Date()): string {

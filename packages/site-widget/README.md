@@ -93,10 +93,13 @@ Protocol mismatches keep the original visitor bubble retryable and never render
 unconfirmed AI text. The legacy `site_widget.v1` response parser remains for a
 backend-first rollout window.
 
-While durable AI work is active, the transcript shows a separate typing
-indicator; the visitor message says `Принято`, not `Доставлено`. AI disclosure
-appears once per dialogue. History adds Russian time/date labels and relative
-allowlisted catalog deep links; raw URLs remain hidden from assistant copy.
+The pending metadata row shows `✓ Отправлено` as soon as the browser dispatches
+the request. A durable server acknowledgment reconciles it to `✓✓ Принято` and
+starts a separate typing indicator while AI work is active; neither state means
+that a manager read the message. AI disclosure appears once per dialogue.
+History adds authoritative semantic `<time>` values, full accessible Russian
+date/time labels, midnight-safe date separators and relative allowlisted
+catalog deep links; raw URLs remain hidden from assistant copy.
 
 The consumer integration budget fixes the total server deadline at 20 seconds:
 15 seconds for the provider plus a bounded 5-second network/persistence
