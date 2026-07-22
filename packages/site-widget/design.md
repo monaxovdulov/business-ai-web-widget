@@ -74,7 +74,8 @@ SiteWidgetRoot
 | `open_idle` | Greeting, quick replies, empty input. |
 | `composing` | Input has text; send button enabled. |
 | `submitting` | Visitor message appears; send button disabled; pending indicator visible. |
-| `replied` | Assistant message appears with disclosure if backend returned AI reply. |
+| `submitted_waiting` | Server accepted the visitor message; composer is usable and a separate AI typing indicator is visible while history reports active work. |
+| `replied` | Persisted history contains an assistant message; disclosure appears once per dialogue. |
 | `fallback` | Manager handoff message appears. |
 | `disabled` | Manager review message appears. |
 | `error` | The pending visitor bubble shows one inline retry; no duplicate system error is added. |
@@ -411,7 +412,8 @@ When panel is open, the mobile action rail is hidden.
 
 | Response status | Bubble text source | Visual status |
 |---|---|---|
-| `replied` | `automation.reply.text` | Assistant bubble with AI disclosure. |
+| `processing` | no reply text in POST | Accepted visitor meta plus separate typing indicator; poll history. |
+| `replied` | persisted `site_widget.history.v2` message | Assistant bubble, authoritative timestamp, optional verified catalog link. |
 | `fallback` | configured fallback text plus backend reason if safe to show | Neutral Marker. |
 | `disabled` | configured manager review text | Neutral Marker. |
 | network error | configured detailed copy in an atomic live region | Existing visitor bubble with one inline retry. |
@@ -507,7 +509,7 @@ granit-site-widget[theme="light-catalog"] {
 ## 25. Mock-only photo boundary
 
 The picker is rendered only for `mock && attachmentsEnabled && showAttachmentSlot`.
-Production `site_widget.v1` is always text-only and renders no disabled or future-photo promise.
+Production `site_widget.v2` is always text-only and renders no disabled or future-photo promise.
 
 Mock preview rules:
 

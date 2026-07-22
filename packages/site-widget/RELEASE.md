@@ -7,7 +7,7 @@ Release, `npm publish` и production deploy выполняются только 
 
 ## Инварианты
 
-- `site_widget.v1` остаётся strict text-only JSON без upload или backend-изменений.
+- `site_widget.v2` остаётся strict text-only JSON без upload; rollout выполняется backend-first, а legacy `v1` response parser сохраняется на окно совместимости.
 - Версия npm не перезаписывается. Перед её выбором проверяются GitHub Packages и
   ранее использованные registry.
 - Единственный тег версии имеет вид `site-widget-v<version>`.
@@ -66,7 +66,7 @@ HTTP server и в Chromium проверяет loader, ESM, JavaScript MIME, од
 - package composition, packed/unpacked sizes и результат secret scan;
 - имя ZIP, SHA-256 и source commit;
 - staging URL и browser/network/CORS/CSP/axe результаты;
-- подтверждение отсутствия backend и `site_widget.v1` contract changes;
+- подтверждение совместимых backend `site_widget.v2` acknowledgement/history контрактов и сохранённого legacy `v1` response path;
 - известные внешние gates и rollback.
 
 Runtime кладётся в отдельном репозитории статического сайта по пути

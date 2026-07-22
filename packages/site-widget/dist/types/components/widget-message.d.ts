@@ -12,4 +12,8 @@ export declare function renderMessageBubble(message: WidgetMessage, context: Wid
 export declare function renderMessageMeta(message: WidgetMessage, context: WidgetMessageRenderContext): TemplateResult | typeof nothing;
 export declare function renderMessageActions(message: WidgetMessage, context: WidgetMessageRenderContext): TemplateResult | typeof nothing;
 export declare function renderMarker(message: WidgetMessage): TemplateResult;
+export declare function renderDateSeparator(message: WidgetMessage, previous: WidgetMessage | undefined, now?: Date): TemplateResult | typeof nothing;
+export declare function renderTypingIndicator(): TemplateResult;
+export declare function formatMessageTime(value: string): string;
+export declare function formatDateLabel(date: Date, now?: Date): string;
 //# sourceMappingURL=widget-message.d.ts.map

@@ -14,18 +14,22 @@ import { createIdempotencyKey } from "../src/domain/ids";
 import { normalizePublicSessionId } from "../src/domain/public-session";
 import { buildSiteWidgetMessageRequest } from "../src/domain/request";
 import { mapSiteWidgetResponse } from "../src/domain/response";
+import { mapSiteWidgetHistory } from "../src/domain/history";
 import { applyWidgetAction, createWidgetState } from "../src/domain/state";
 import { buildWidgetViewModel } from "../src/domain/view-model";
 import { emitSiteWidgetEvent } from "../src/events/widget-events";
 import { sendSiteWidgetMessage } from "../src/services/intake-client";
 import { createSessionStore } from "../src/services/session-store";
+import { formatDateLabel, formatMessageTime } from "../src/components/widget-message";
 import {
   disabledReceipt,
   degradedReceipt,
   fallbackReceipt,
   repliedReceipt,
   TEST_REPLY_MESSAGE_ID,
-  TEST_VISITOR_MESSAGE_ID
+  TEST_VISITOR_MESSAGE_ID,
+  v2History,
+  v2ProcessingReceipt
 } from "./helpers/response-fixtures";
 
 const firstSessionId = "11111111-1111-4111-8111-111111111111";
@@ -114,7 +118,7 @@ describe("site widget domain", () => {
     }
   });
 
-  it("builds the v1 public intake request with UTM and no empty fields", () => {
+  it("builds the v2 public intake request with UTM and no empty fields", () => {
     const config = normalizeWidgetConfig({
       apiBaseUrl: "https://ops.example.com",
       widgetInstanceId: "main"
@@ -137,7 +141,7 @@ describe("site widget domain", () => {
       }
     });
 
-    expect(request.schema_version).toBe("site_widget.v1");
+    expect(request.schema_version).toBe("site_widget.v2");
     expect(request.event_type).toBe("site_widget.message_submitted");
     expect(request.source.utm).toEqual({ source: "ads", campaign: "summer" });
     expect(request.contact).toEqual({ phone: "+79990000000" });
@@ -200,6 +204,89 @@ describe("site widget domain", () => {
       systemText: "Сообщение сохранено, но AI не смог ответить на этот ход.",
       reason: "grounding_validation_failed"
     });
+  });
+
+  it("maps the v2 durable acknowledgement without inventing an AI reply", () => {
+    const mapped = mapSiteWidgetResponse(v2ProcessingReceipt(), normalizeWidgetConfig());
+
+    expect(mapped).toMatchObject({
+      source: "server",
+      acceptanceStatus: "accepted",
+      status: "processing",
+      publicSessionId: firstSessionId,
+      publicMessageId: TEST_VISITOR_MESSAGE_ID,
+      submittedAt: "2026-07-22T19:00:00.000Z",
+      pollAfterMs: 700
+    });
+    expect("replyText" in mapped).toBe(false);
+  });
+
+  it("strictly maps v2 history, verified catalog references and authoritative timestamps", () => {
+    const history = mapSiteWidgetHistory(v2History());
+
+    expect(history.messages).toMatchObject([
+      {
+        senderRole: "visitor",
+        submittedAt: "2026-07-22T19:00:00.000Z",
+        automation: { status: "replied" }
+      },
+      {
+        senderRole: "ai_assistant",
+        submittedAt: "2026-07-22T19:00:02.000Z",
+        catalogReferences: [
+          {
+            label: "Посмотреть «Арфа»",
+            href: "/catalog.html?section=pamyatniki&entity=ent_1395cd250bbce644514c7e44#block-vertical-monuments"
+          }
+        ]
+      }
+    ]);
+
+    const unsafe = v2History();
+    const unsafeMessages = unsafe.messages as Array<Record<string, unknown>>;
+    const references = unsafeMessages[1]?.catalog_references as Array<Record<string, unknown>>;
+    if (references[0]) references[0].href = "https://evil.example/catalog.html";
+    expect(() => mapSiteWidgetHistory(unsafe)).toThrow(
+      "Invalid site_widget.history.v2 response: messages.1.catalog_references.0.href"
+    );
+  });
+
+  it("reconciles persisted history with one disclosure and Russian time labels", () => {
+    const config = normalizeWidgetConfig();
+    const history = mapSiteWidgetHistory(v2History());
+    let state = createWidgetState({ config, open: true });
+    state = applyWidgetAction(
+      state,
+      {
+        type: "history.synced",
+        messages: history.messages,
+        awaitingAi: false,
+        conversationState: history.conversationState
+      },
+      config
+    );
+
+    expect(state.messages).toHaveLength(3);
+    expect(state.messages.filter((message) => message.disclosure)).toHaveLength(1);
+    expect(state.messages[1]).toMatchObject({
+      role: "visitor",
+      status: "saved",
+      createdAt: "2026-07-22T19:00:00.000Z"
+    });
+    expect(state.messages[2]?.catalogReferences).toHaveLength(1);
+    expect(formatMessageTime("2026-07-22T19:05:00.000Z")).toMatch(/^\d{2}:\d{2}$/);
+    expect(
+      formatDateLabel(
+        new Date("2026-07-22T10:00:00.000Z"),
+        new Date("2026-07-22T20:00:00.000Z")
+      )
+    ).toBe("Сегодня");
+    expect(
+      formatDateLabel(
+        new Date("2026-07-21T10:00:00.000Z"),
+        new Date("2026-07-22T20:00:00.000Z")
+      )
+    ).toBe("Вчера");
   });
 
   it("rejects responses that cannot prove root truth or persisted identities", () => {
@@ -320,7 +407,7 @@ describe("site widget domain", () => {
 
     try {
       await expect(sendSiteWidgetMessage(config, request)).rejects.toThrow(
-        "Invalid site_widget.v1 response: public_session_id_mismatch"
+        "Invalid site_widget.v2 response: public_session_id_mismatch"
       );
     } finally {
       fetchMock.mockRestore();

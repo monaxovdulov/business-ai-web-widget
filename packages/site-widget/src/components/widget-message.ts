@@ -29,6 +29,22 @@ export function renderMessageRoot(message: WidgetMessage, context: WidgetMessage
 export function renderMessageBubble(message: WidgetMessage, context: WidgetMessageRenderContext): TemplateResult {
   return html`<article class=${messageClass(message)} part=${`message message-${message.role} message-bubble`}>
     <p class="message__text">${message.text}</p>
+    ${message.catalogReferences?.length
+      ? html`<div class="message-links" part="message-links">
+          ${message.catalogReferences.map(
+            (reference) => html`<a
+              class="message-link"
+              part="message-link"
+              href=${reference.href}
+              target="_self"
+              data-entity-id=${reference.entityId}
+            >
+              ${reference.label}
+              <span aria-hidden="true">→</span>
+            </a>`
+          )}
+        </div>`
+      : nothing}
     ${renderMessageAttachments(context.images ?? [])}
   </article>`;
 }
@@ -38,7 +54,7 @@ export function renderMessageMeta(
   context: WidgetMessageRenderContext
 ): TemplateResult | typeof nothing {
   const hasStatus = message.status === "pending" || message.status === "saved" || message.status === "error";
-  if (!message.disclosure && !hasStatus) return nothing;
+  if (message.localKind === "intro" && !message.disclosure && !hasStatus) return nothing;
 
   return html`<div class="message-meta" part="message-meta">
     ${message.disclosure
@@ -47,19 +63,23 @@ export function renderMessageMeta(
           <span>${message.disclosureText ?? context.config.disclosureText}</span>
         </div>`
       : nothing}
-    ${hasStatus
-      ? html`<div class=${`message-status-row message-status-row--${message.status}`}>
+    <div class=${`message-status-row message-status-row--${message.status}`}>
+      <time class="message-time" datetime=${message.createdAt}>${formatMessageTime(message.createdAt)}</time>
+      ${hasStatus
+        ? html`
+          <span aria-hidden="true">·</span>
           <span class="message-status" part="message-status">
             ${message.status === "pending"
               ? html`<span class="message-status__spinner" aria-hidden="true">${widgetIcon("loader", 14)}</span
                   >Отправляем…`
               : message.status === "saved"
-                ? "Сохранено"
+                ? "Принято"
                 : "Не отправлено"}
           </span>
           ${renderMessageActions(message, context)}
-        </div>`
-      : nothing}
+        `
+        : nothing}
+    </div>
   </div>`;
 }
 
@@ -92,6 +112,61 @@ export function renderMarker(message: WidgetMessage): TemplateResult {
     <span class="marker__icon" part="marker-icon" aria-hidden="true">${widgetIcon("shield", 16)}</span>
     <span class="marker__text" part="marker-text">${message.text}</span>
   </div>`;
+}
+
+export function renderDateSeparator(
+  message: WidgetMessage,
+  previous: WidgetMessage | undefined,
+  now = new Date()
+): TemplateResult | typeof nothing {
+  if (message.localKind === "intro") return nothing;
+  const currentDate = validDate(message.createdAt);
+  const previousDate = previous && previous.localKind !== "intro" ? validDate(previous.createdAt) : undefined;
+  if (!currentDate || (previousDate && sameCalendarDate(currentDate, previousDate))) return nothing;
+
+  return html`<div class="date-separator" part="date-separator" role="separator">
+    <span>${formatDateLabel(currentDate, now)}</span>
+  </div>`;
+}
+
+export function renderTypingIndicator(): TemplateResult {
+  return html`<div class="typing" part="typing-indicator" role="status" aria-label="AI-помощник печатает">
+    <span class="typing__avatar" aria-hidden="true">${widgetIcon("spark", 16)}</span>
+    <span class="typing__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="visually-hidden">AI-помощник печатает</span>
+  </div>`;
+}
+
+export function formatMessageTime(value: string): string {
+  const date = validDate(value);
+  return date
+    ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(date)
+    : "";
+}
+
+export function formatDateLabel(date: Date, now = new Date()): string {
+  if (sameCalendarDate(date, now)) return "Сегодня";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (sameCalendarDate(date, yesterday)) return "Вчера";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric"
+  }).format(date);
+}
+
+function validDate(value: string): Date | undefined {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : undefined;
+}
+
+function sameCalendarDate(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
 }
 
 function messageClass(message: WidgetMessage): string {

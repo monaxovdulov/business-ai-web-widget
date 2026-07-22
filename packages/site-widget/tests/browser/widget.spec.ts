@@ -5,7 +5,9 @@ import {
   degradedReceipt,
   fallbackReceipt,
   repliedReceipt,
-  TEST_VISITOR_MESSAGE_ID
+  TEST_VISITOR_MESSAGE_ID,
+  v2History,
+  v2ProcessingReceipt
 } from "../helpers/response-fixtures";
 
 type FixtureWindow = Window &
@@ -46,6 +48,7 @@ type RectMetrics = {
 
 const fixturePath = "/tests/fixtures/widget.html";
 const apiRoute = "**/api/public/intake/site-widget/messages";
+const historyRoute = "**/api/public/intake/site-widget/sessions/*/history?*";
 const screenshotDirectory = "C:/Users/user/Desktop/business-ai-web-widget/output/site-widget-qa";
 
 test.beforeEach(async ({ page }) => {
@@ -87,7 +90,7 @@ test("open/close возвращает focus и переключает normal, wi
   await expect(launcher).toBeFocused();
 });
 
-test("replied сохраняет strict site_widget.v1 и production не показывает photo UI", async ({ page }) => {
+test("replied отправляет site_widget.v2 и production не показывает photo UI", async ({ page }) => {
   const captured = await interceptApi(page, [
     {
       body: repliedReceipt({
@@ -106,7 +109,7 @@ test("replied сохраняет strict site_widget.v1 и production не пок
   expect(captured).toHaveLength(1);
   const request = captured[0];
   expect(request?.contentType).toContain("application/json");
-  expect(request?.body.schema_version).toBe("site_widget.v1");
+  expect(request?.body.schema_version).toBe("site_widget.v2");
   expect(request?.body.event_type).toBe("site_widget.message_submitted");
   expect(request?.body.message).toStrictEqual({ role: "visitor", text: "Нужен расчет памятника" });
   expect(request?.body.public_session_id).toBeUndefined();
@@ -114,6 +117,53 @@ test("replied сохраняет strict site_widget.v1 и production не пок
   expect(widget(page).locator(".message-attachment__preview")).toHaveCount(0);
   await expect(widget(page).locator(".message-root--visitor")).toHaveAttribute("data-message-status", "saved");
   await saveScreenshot(page, "replied-desktop");
+});
+
+test("v2 показывает accepted и typing, затем время и безопасную ссылку каталога", async ({ page }) => {
+  let releaseHistory: () => void = () => undefined;
+  const historyGate = new Promise<void>((resolve) => {
+    releaseHistory = resolve;
+  });
+  const sessionId = "55555555-5555-4555-8555-555555555555";
+  await page.route(apiRoute, async (route) => {
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(v2ProcessingReceipt({ publicSessionId: sessionId, pollAfterMs: 250 }))
+    });
+  });
+  await page.route(historyRoute, async (route) => {
+    await historyGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(v2History({ publicSessionId: sessionId }))
+    });
+  });
+  await gotoWidget(page, { open: true, scenario: "v2-accepted-typing-link" });
+  await submitText(page, "Покажите модель Арфа");
+
+  const visitor = widget(page).locator(".message-root--visitor");
+  await expect(visitor).toHaveAttribute("data-message-status", "saved");
+  await expect(visitor.locator(".message-status")).toContainText("Принято");
+  await expect(widget(page).locator('[part~="typing-indicator"]')).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Напишите сообщение..." })).toBeEnabled();
+  await saveScreenshot(page, "v2-typing-desktop");
+
+  releaseHistory();
+  const link = widget(page).locator('[part~="message-link"]');
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute(
+    "href",
+    "/catalog.html?section=pamyatniki&entity=ent_1395cd250bbce644514c7e44#block-vertical-monuments"
+  );
+  await expect(link).toHaveAttribute("target", "_self");
+  await expect(widget(page).locator('[part~="typing-indicator"]')).toHaveCount(0);
+  await expect(widget(page).locator('[part~="message-disclosure"]')).toHaveCount(1);
+  await expect(widget(page).locator(".message-time")).toHaveCount(2);
+  await expect(widget(page).locator('[part~="date-separator"]')).toHaveCount(1);
+  await expectNoAxeViolations(page, "v2 replied desktop");
+  await saveScreenshot(page, "v2-replied-desktop");
 });
 
 test("deferred response показывает pending bubble и отдельный sending status не позднее 300 ms", async ({ page }) => {

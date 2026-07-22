@@ -1,6 +1,8 @@
 import type {
   SiteWidgetAcceptanceStatus,
   SiteWidgetConfig,
+  SiteWidgetHistoryMessage,
+  WidgetCatalogReference,
   WidgetMessage,
   WidgetMessageStatus,
   WidgetSystemKind
@@ -32,6 +34,8 @@ export type WidgetState = {
   contactCaptureOpen: boolean;
   submitting: boolean;
   pending?: PendingSubmission | undefined;
+  awaitingAi: boolean;
+  conversationState?: "ai_active" | "manager_pending" | "manager_active" | "closed" | undefined;
   messages: WidgetMessage[];
   visitorMessageCount: number;
   unreadCount: number;
@@ -50,6 +54,8 @@ export type WidgetAction =
       messageId: string;
       publicMessageId: string;
       acceptanceStatus: SiteWidgetAcceptanceStatus;
+      submittedAt?: string | undefined;
+      awaitingAi?: boolean | undefined;
     }
   | { type: "visitor.mocked"; messageId: string }
   | {
@@ -57,6 +63,14 @@ export type WidgetAction =
       text: string;
       publicMessageId?: string | undefined;
       disclosureText?: string | undefined;
+      catalogReferences?: WidgetCatalogReference[] | undefined;
+      createdAt?: string | undefined;
+    }
+  | {
+      type: "history.synced";
+      messages: SiteWidgetHistoryMessage[];
+      awaitingAi: boolean;
+      conversationState: "ai_active" | "manager_pending" | "manager_active" | "closed";
     }
   | { type: "system.message"; text: string; status: "fallback" | "disabled" }
   | { type: "submit.failed"; text: string; messageId?: string }
@@ -79,11 +93,14 @@ export function createWidgetState({
     contactCaptureOpen: false,
     submitting: false,
     pending: undefined,
+    awaitingAi: false,
+    conversationState: undefined,
     messages: [
       createWidgetMessage({
         role: "assistant",
         text: config.introMessage,
-        createdAt: now.toISOString()
+        createdAt: now.toISOString(),
+        localKind: "intro"
       })
     ],
     visitorMessageCount: 0,
@@ -168,13 +185,18 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
       if (action.messageId !== current.pending.messageId) return current;
       return {
         ...current,
+        status: action.awaitingAi ? "submitted_waiting" : "open_idle",
+        submitting: false,
+        pending: undefined,
+        awaitingAi: Boolean(action.awaitingAi),
         messages: current.messages.map((message) =>
           message.id === current.pending?.messageId
             ? {
                 ...message,
                 status: "saved" as const,
                 publicMessageId: action.publicMessageId,
-                acceptanceStatus: action.acceptanceStatus
+                acceptanceStatus: action.acceptanceStatus,
+                createdAt: action.submittedAt ?? message.createdAt
               }
             : message
         )
@@ -193,20 +215,26 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
 
     case "assistant.replied": {
       const text = String(action.text ?? "").trim();
+      const disclosureAlreadyShown = current.messages.some((message) => message.disclosure);
       const messages = text
         ? [
             ...current.messages,
             createWidgetMessage({
               role: "assistant",
               text,
-              disclosure: true,
+              disclosure: !disclosureAlreadyShown,
               publicMessageId: action.publicMessageId,
-              disclosureText: action.disclosureText
+              disclosureText: action.disclosureText,
+              catalogReferences: action.catalogReferences,
+              createdAt: action.createdAt
             })
           ]
         : current.messages;
       return finishSubmit(current, messages, "replied");
     }
+
+    case "history.synced":
+      return syncHistory(current, action);
 
     case "system.message": {
       const text = String(action.text ?? "").trim();
@@ -231,7 +259,9 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
     }
 
     case "session.cleared":
-      return config ? createWidgetState({ config, open: current.open }) : { ...current, pending: undefined, submitting: false };
+      return config
+        ? createWidgetState({ config, open: current.open })
+        : { ...current, pending: undefined, submitting: false, awaitingAi: false };
 
     default:
       return current;
@@ -254,6 +284,9 @@ export function createWidgetMessage({
   acceptanceStatus,
   disclosureText,
   systemKind,
+  catalogReferences,
+  localKind,
+  id,
   createdAt = new Date().toISOString()
 }: {
   role: WidgetMessage["role"];
@@ -264,10 +297,13 @@ export function createWidgetMessage({
   acceptanceStatus?: SiteWidgetAcceptanceStatus;
   disclosureText?: string | undefined;
   systemKind?: WidgetSystemKind;
-  createdAt?: string;
+  catalogReferences?: WidgetCatalogReference[] | undefined;
+  localKind?: "intro" | undefined;
+  id?: string | undefined;
+  createdAt?: string | undefined;
 }): WidgetMessage {
   return {
-    id: createClientId("msg"),
+    id: id ?? createClientId("msg"),
     role,
     text: String(text ?? ""),
     status,
@@ -276,6 +312,8 @@ export function createWidgetMessage({
     disclosure,
     disclosureText,
     systemKind,
+    catalogReferences,
+    localKind,
     createdAt
   };
 }
@@ -286,6 +324,7 @@ function finishSubmit(state: WidgetState, messages: WidgetMessage[], status: "re
     status,
     submitting: false,
     pending: undefined,
+    awaitingAi: false,
     messages,
     unreadCount: state.open ? state.unreadCount : state.unreadCount + 1
   };
@@ -294,6 +333,7 @@ function finishSubmit(state: WidgetState, messages: WidgetMessage[], status: "re
 function statusForOpen(state: WidgetState, config?: SiteWidgetConfig): WidgetStatus {
   const draftError = config ? validateDraft(state.draft, config) : state.draft.trim() ? null : "empty_message";
   if (state.submitting) return "submitted_waiting";
+  if (state.awaitingAi) return "submitted_waiting";
   if (state.status === "error") return "error";
   if (state.status === "replied" || state.status === "fallback" || state.status === "disabled") return state.status;
   return state.draft.trim() && !draftError ? "composing" : "open_idle";
@@ -305,8 +345,70 @@ function normalizeState(state: WidgetState): WidgetState {
     draft: String(state.draft ?? ""),
     contactPhone: String(state.contactPhone ?? ""),
     submitting: Boolean(state.submitting),
+    awaitingAi: Boolean(state.awaitingAi),
     messages: Array.isArray(state.messages) ? state.messages : [],
     visitorMessageCount: Number.isInteger(state.visitorMessageCount) ? state.visitorMessageCount : 0,
     unreadCount: Number.isInteger(state.unreadCount) ? state.unreadCount : 0
+  };
+}
+
+function syncHistory(
+  state: WidgetState,
+  action: Extract<WidgetAction, { type: "history.synced" }>
+): WidgetState {
+  const intro = state.messages.find((message) => message.localKind === "intro");
+  const localMessages = state.messages.filter(
+    (message) => message.localKind !== "intro" && !message.publicMessageId
+  );
+  const existingByPublicId = new Map(
+    state.messages.flatMap((message) =>
+      message.publicMessageId ? [[message.publicMessageId, message] as const] : []
+    )
+  );
+  let disclosureAssigned = false;
+  const persisted = action.messages.map((message) => {
+    const existing = existingByPublicId.get(message.publicMessageId);
+    const assistant = message.senderRole !== "visitor";
+    const disclosure = message.senderRole === "ai_assistant" && !disclosureAssigned;
+    if (disclosure) disclosureAssigned = true;
+
+    return createWidgetMessage({
+      id: existing?.id ?? `server:${message.publicMessageId}`,
+      role: assistant ? "assistant" : "visitor",
+      text: message.text,
+      status: assistant ? "sent" : "saved",
+      publicMessageId: message.publicMessageId,
+      acceptanceStatus: existing?.acceptanceStatus ?? "accepted",
+      disclosure,
+      disclosureText: existing?.disclosureText,
+      catalogReferences: message.catalogReferences,
+      createdAt: message.submittedAt
+    });
+  });
+  const previousPublicIds = new Set(existingByPublicId.keys());
+  const newUnread = action.messages.filter(
+    (message) => message.senderRole !== "visitor" && !previousPublicIds.has(message.publicMessageId)
+  ).length;
+  const messages = [...(intro ? [intro] : []), ...persisted, ...localMessages];
+  const hasReply = action.messages.some((message) => message.senderRole !== "visitor");
+  const status: WidgetStatus = action.awaitingAi
+    ? "submitted_waiting"
+    : action.conversationState === "manager_pending" || action.conversationState === "manager_active"
+      ? "fallback"
+      : hasReply
+        ? "replied"
+        : "open_idle";
+
+  return {
+    ...state,
+    status,
+    awaitingAi: action.awaitingAi,
+    conversationState: action.conversationState,
+    messages,
+    visitorMessageCount: Math.max(
+      state.visitorMessageCount,
+      action.messages.filter((message) => message.senderRole === "visitor").length
+    ),
+    unreadCount: state.open ? state.unreadCount : state.unreadCount + newUnread
   };
 }

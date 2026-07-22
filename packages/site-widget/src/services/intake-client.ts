@@ -1,7 +1,13 @@
 import { normalizeSiteWidgetTimeoutMs } from "../domain/config";
 import { mapSiteWidgetResponse } from "../domain/response";
+import { mapSiteWidgetHistory } from "../domain/history";
 import { normalizePublicSessionId } from "../domain/public-session";
-import type { SiteWidgetConfig, SiteWidgetMessageRequest, SiteWidgetResponseViewModel } from "../types/public";
+import type {
+  SiteWidgetConfig,
+  SiteWidgetHistoryViewModel,
+  SiteWidgetMessageRequest,
+  SiteWidgetResponseViewModel
+} from "../types/public";
 
 export async function sendSiteWidgetMessage(
   config: SiteWidgetConfig,
@@ -38,9 +44,53 @@ export async function sendSiteWidgetMessage(
     const mapped = mapSiteWidgetResponse(body, config);
     const requestedPublicSessionId = normalizePublicSessionId(request.public_session_id);
     if (requestedPublicSessionId && mapped.publicSessionId !== requestedPublicSessionId) {
-      throw new Error("Invalid site_widget.v1 response: public_session_id_mismatch");
+      throw new Error("Invalid site_widget.v2 response: public_session_id_mismatch");
     }
     return mapped;
+  } finally {
+    globalThis.clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortForwarder);
+  }
+}
+
+export async function fetchSiteWidgetHistory(
+  config: SiteWidgetConfig,
+  publicSessionId: string,
+  signal?: AbortSignal
+): Promise<SiteWidgetHistoryViewModel> {
+  const normalizedSessionId = normalizePublicSessionId(publicSessionId);
+  if (!normalizedSessionId) throw new Error("Invalid site_widget.history.v2 request: public_session_id");
+  if (!config.apiBaseUrl) throw new Error("apiBaseUrl is required when mock=false");
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(),
+    Math.min(normalizeSiteWidgetTimeoutMs(config.timeoutMs), 10_000)
+  );
+  const abortForwarder = () => controller.abort();
+  signal?.addEventListener("abort", abortForwarder, { once: true });
+
+  try {
+    const path = `/public/intake/site-widget/sessions/${encodeURIComponent(normalizedSessionId)}/history`;
+    const response = await fetch(
+      `${config.apiBaseUrl}${path}?schema_version=site_widget.history.v2`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "omit",
+        signal: controller.signal
+      }
+    );
+    const body = await readResponseBody(response);
+    if (!response.ok) {
+      throw new Error(readErrorMessage(body) ?? `Widget history failed with HTTP ${response.status}`);
+    }
+    const history = mapSiteWidgetHistory(body);
+    if (history.publicSessionId !== normalizedSessionId) {
+      throw new Error("Invalid site_widget.history.v2 response: public_session_id_mismatch");
+    }
+    return history;
   } finally {
     globalThis.clearTimeout(timeout);
     signal?.removeEventListener("abort", abortForwarder);

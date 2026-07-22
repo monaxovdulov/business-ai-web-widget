@@ -6,7 +6,9 @@ import {
   fallbackReceipt,
   repliedReceipt,
   TEST_REPLY_MESSAGE_ID,
-  TEST_VISITOR_MESSAGE_ID
+  TEST_VISITOR_MESSAGE_ID,
+  v2History,
+  v2ProcessingReceipt
 } from "./helpers/response-fixtures";
 
 const BACKEND_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -112,6 +114,78 @@ describe("granit-site-widget Lit component", () => {
     await vi.waitFor(() => {
       expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("false");
     });
+  });
+
+  it("shows accepted then typing, restores the AI reply, and renders a safe catalog link with time", async () => {
+    const requests: Array<{
+      method: string;
+      url: string;
+      body?: Record<string, unknown> | undefined;
+    }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const method = init?.method ?? "GET";
+      const url = String(input);
+      requests.push({
+        method,
+        url,
+        body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
+      });
+
+      if (method === "POST") {
+        return new Response(
+          JSON.stringify(
+            v2ProcessingReceipt({
+              publicSessionId: BACKEND_SESSION_ID,
+              pollAfterMs: 250
+            })
+          ),
+          { status: 202, headers: { "content-type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify(v2History({ publicSessionId: BACKEND_SESSION_ID })),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "v2-async-ui"
+    });
+    await widget.updateComplete;
+
+    widget.sendMessage("Покажите модель Арфа");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('.message-root--visitor')?.getAttribute("data-message-status")).toBe(
+        "saved"
+      );
+      expect(widget.shadowRoot?.querySelector('[part~="typing-indicator"]')).toBeTruthy();
+    });
+
+    expect(widget.shadowRoot?.textContent).toContain("Принято");
+    expect(widget.shadowRoot?.querySelector<HTMLTextAreaElement>(".textarea")?.disabled).toBe(false);
+    expect(requests[0]?.body?.schema_version).toBe("site_widget.v2");
+
+    await vi.waitFor(
+      () => {
+        expect(widget.shadowRoot?.querySelector('[part~="typing-indicator"]')).toBeNull();
+        expect(widget.shadowRoot?.querySelectorAll('[part~="message-link"]')).toHaveLength(1);
+      },
+      { timeout: 2_000 }
+    );
+
+    const link = widget.shadowRoot?.querySelector<HTMLAnchorElement>('[part~="message-link"]');
+    expect(link?.getAttribute("href")).toBe(
+      "/catalog.html?section=pamyatniki&entity=ent_1395cd250bbce644514c7e44#block-vertical-monuments"
+    );
+    expect(link?.getAttribute("target")).toBe("_self");
+    expect(link?.textContent).toContain("Посмотреть «Арфа»");
+    expect(widget.shadowRoot?.querySelectorAll('[part~="message-disclosure"]')).toHaveLength(1);
+    expect(widget.shadowRoot?.querySelectorAll(".message-time")).toHaveLength(2);
+    expect(widget.shadowRoot?.textContent).not.toContain("/catalog.html?");
+    expect(requests.some((request) => request.url.includes("site_widget.history.v2"))).toBe(true);
   });
 
   it("handles Escape once and restores focus to the launcher", async () => {
