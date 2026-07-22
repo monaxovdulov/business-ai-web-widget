@@ -200,6 +200,52 @@ describe("granit-site-widget Lit component", () => {
     expect(requests.some((request) => request.url.includes("site_widget.history.v2"))).toBe(true);
   });
 
+  it("restores an explicit manager marker from manager-active history without stuck typing", async () => {
+    const widgetInstanceId = "manager-active-history";
+    localStorage.setItem(`sw:${widgetInstanceId}:public_session_id`, BACKEND_SESSION_ID);
+    const history = {
+      ...v2History({
+        publicSessionId: BACKEND_SESSION_ID,
+        messages: [
+          {
+            public_message_id: TEST_VISITOR_MESSAGE_ID,
+            sender_role: "visitor",
+            text: "Ещё вопрос после подключения менеджера",
+            submitted_at: "2026-07-22T20:23:01.374Z",
+            delivery_state: "accepted"
+          }
+        ]
+      }),
+      conversation_state: "manager_active"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(history), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId
+    });
+
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('[part~="marker"]')?.textContent).toContain(
+        "Менеджер проверит детали"
+      );
+    });
+
+    expect(widget.shadowRoot?.querySelector('[part~="typing-indicator"]')).toBeNull();
+    expect(widget.shadowRoot?.querySelector('.message-status__spinner')).toBeNull();
+    expect(widget.shadowRoot?.querySelectorAll('[part~="marker"]')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("site_widget.history.v2"),
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
   it("handles Escape once and restores focus to the launcher", async () => {
     const widget = mountSiteWidget({ mock: true, open: true, widgetInstanceId: "escape-once" });
     const closed = vi.fn();

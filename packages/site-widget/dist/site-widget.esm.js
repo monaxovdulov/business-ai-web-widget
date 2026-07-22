@@ -1656,8 +1656,10 @@ function w(s, e, t) {
     case "history.synced":
       return ii(i, e);
     case "system.message": {
-      const o = String(e.text ?? "").trim(), r = o ? [...i.messages, X({ role: "system", text: o, systemKind: e.status })] : i.messages;
-      return pt(i, r, e.status);
+      const o = String(e.text ?? "").trim(), r = i.messages.some(
+        (l) => l.role === "system" && l.systemKind === e.status && l.text === o
+      ), n = o && !r ? [...i.messages, X({ role: "system", text: o, systemKind: e.status })] : i.messages;
+      return pt(i, n, e.status);
     }
     case "submit.failed": {
       if (!i.pending || e.messageId && e.messageId !== i.pending.messageId) return i;
@@ -4264,20 +4266,27 @@ const Fe = "granit-site-widget", bo = ["normal", "wide", "fullscreen"], vo = ["n
             conversationState: n.conversationState
           },
           this.config
-        ), !l) {
-          const a = [...n.messages].reverse().find(
-            (c) => c.automation && (c.automation.status === "degraded" || c.automation.status === "failed" || c.automation.status === "blocked")
-          );
-          a?.automation?.status === "blocked" ? this.state = w(
-            this.state,
-            { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
-            this.config
-          ) : a && (this.state = w(
-            this.state,
-            { type: "system.message", text: this.config.fallbackMessage, status: "fallback" },
-            this.config
-          ));
-        }
+        ), !l)
+          if (n.conversationState === "manager_pending" || n.conversationState === "manager_active")
+            this.state = w(
+              this.state,
+              { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
+              this.config
+            );
+          else {
+            const a = [...n.messages].reverse().find(
+              (c) => c.automation && (c.automation.status === "degraded" || c.automation.status === "failed" || c.automation.status === "blocked")
+            );
+            a?.automation?.status === "blocked" ? this.state = w(
+              this.state,
+              { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
+              this.config
+            ) : a && (this.state = w(
+              this.state,
+              { type: "system.message", text: this.config.fallbackMessage, status: "fallback" },
+              this.config
+            ));
+          }
         if (this.requestUpdate(), !l) break;
         o = n.pollAfterMs ?? 700;
       } catch (n) {

@@ -827,26 +827,37 @@ export class GranitSiteWidgetElement extends LitElement {
         );
 
         if (!awaitingAi) {
-          const terminal = [...history.messages]
-            .reverse()
-            .find((message) =>
-              message.automation &&
-              (message.automation.status === "degraded" ||
-                message.automation.status === "failed" ||
-                message.automation.status === "blocked")
-            );
-          if (terminal?.automation?.status === "blocked") {
+          if (
+            history.conversationState === "manager_pending" ||
+            history.conversationState === "manager_active"
+          ) {
             this.state = applyWidgetAction(
               this.state,
               { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
               this.config
             );
-          } else if (terminal) {
-            this.state = applyWidgetAction(
-              this.state,
-              { type: "system.message", text: this.config.fallbackMessage, status: "fallback" },
-              this.config
-            );
+          } else {
+            const terminal = [...history.messages]
+              .reverse()
+              .find((message) =>
+                message.automation &&
+                (message.automation.status === "degraded" ||
+                  message.automation.status === "failed" ||
+                  message.automation.status === "blocked")
+              );
+            if (terminal?.automation?.status === "blocked") {
+              this.state = applyWidgetAction(
+                this.state,
+                { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
+                this.config
+              );
+            } else if (terminal) {
+              this.state = applyWidgetAction(
+                this.state,
+                { type: "system.message", text: this.config.fallbackMessage, status: "fallback" },
+                this.config
+              );
+            }
           }
         }
 

@@ -238,7 +238,13 @@ export function applyWidgetAction(state: WidgetState, action: WidgetAction, conf
 
     case "system.message": {
       const text = String(action.text ?? "").trim();
-      const messages = text
+      const alreadyShown = current.messages.some(
+        (message) =>
+          message.role === "system" &&
+          message.systemKind === action.status &&
+          message.text === text
+      );
+      const messages = text && !alreadyShown
         ? [...current.messages, createWidgetMessage({ role: "system", text, systemKind: action.status })]
         : current.messages;
       return finishSubmit(current, messages, action.status);
