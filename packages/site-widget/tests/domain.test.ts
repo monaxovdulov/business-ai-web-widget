@@ -41,6 +41,11 @@ const firstSessionId = "11111111-1111-4111-8111-111111111111";
 const secondSessionId = "22222222-2222-4222-8222-222222222222";
 
 describe("site widget domain", () => {
+  it("keeps the default greeting text-only so it cannot render as a replacement glyph", () => {
+    expect(DEFAULT_WIDGET_CONFIG.introMessage.split("\n")[0]).toBe("Здравствуйте!");
+    expect(DEFAULT_WIDGET_CONFIG.introMessage).not.toMatch(/[👋�]/u);
+  });
+
   it("normalizes public config and keeps quick replies in prefill mode by default", () => {
     const element = document.createElement("granit-site-widget");
     element.setAttribute("api-base-url", "https://ops.example.com/");
