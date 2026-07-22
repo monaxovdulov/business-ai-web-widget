@@ -159,6 +159,8 @@ export type SiteWidgetConfig = {
     messagesPath: "/public/intake/site-widget/messages" | string;
     timeoutMs: number;
     widgetInstanceId: string;
+    conversationScopeId: string;
+    legacyConversationScopeIds: string[];
     theme: SiteWidgetTheme;
     position: SiteWidgetPosition;
     panelSize: SiteWidgetPanelSize;

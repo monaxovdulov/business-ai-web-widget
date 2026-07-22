@@ -14,6 +14,8 @@ the same origin as the page:
   defer
   src="/vendor/granit/site-widget/v1.0.0/loader.js"
   data-widget-instance-id="memorial-main"
+  data-conversation-scope-id="memorial-customer"
+  data-legacy-conversation-scope-ids="memorial-main,memorial-catalog"
   data-api-base-url="https://ops.example.com"
   data-theme="memorial-soft"
   data-panel-size="normal">
@@ -25,6 +27,14 @@ to its own `src`, and mounts the widget into `document.body`. Replace the
 example API origin only with an approved environment value. Production must
 not set mock or attachment-preview flags.
 
+`widgetInstanceId` identifies the individual mount and remains visible in the
+request source metadata. `conversationScopeId` independently selects the
+browser namespace for `public_session_id`, so several pages can continue one
+conversation without sharing page-specific open state or panel size. Ordered
+`legacyConversationScopeIds` are consulted once when the canonical scope is
+empty; the first valid backend UUID wins, conversations are never merged, and
+legacy keys remain available for rollback.
+
 ## Direct Web Component
 
 ```html
@@ -32,6 +42,8 @@ not set mock or attachment-preview flags.
 
 <granit-site-widget
   widget-instance-id="memorial-main"
+  conversation-scope-id="memorial-customer"
+  legacy-conversation-scope-ids="memorial-main,memorial-catalog"
   api-base-url="https://ops.example.com"
   theme="memorial-soft"
   panel-size="normal">
@@ -59,6 +71,8 @@ defineSiteWidget();
 
 const widget = mountSiteWidget({
   widgetInstanceId: "memorial-main",
+  conversationScopeId: "memorial-customer",
+  legacyConversationScopeIds: ["memorial-main", "memorial-catalog"],
   apiBaseUrl: "https://ops.example.com",
   theme: "memorial-soft",
   panelSize: "normal"

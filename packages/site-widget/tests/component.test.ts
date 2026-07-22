@@ -1242,6 +1242,29 @@ describe("granit-site-widget Lit component", () => {
     expect(transcriptTexts()).not.toContain("Запрос экземпляра A");
   });
 
+  it("establishes a fresh runtime boundary when conversation scope changes", async () => {
+    const widget = mountSiteWidget({
+      mock: true,
+      open: true,
+      widgetInstanceId: "shared-mount",
+      conversationScopeId: "conversation-a",
+      legacyConversationScopeIds: ["legacy-a"]
+    });
+    await widget.updateComplete;
+
+    widget.sendMessage("Сообщение прежнего conversation scope");
+    await vi.waitFor(() =>
+      expect(widget.shadowRoot?.textContent).toContain("Сообщение прежнего conversation scope")
+    );
+
+    widget.setAttribute("conversation-scope-id", "conversation-b");
+    widget.setAttribute("legacy-conversation-scope-ids", "legacy-b,legacy-c");
+    await widget.updateComplete;
+
+    expect(widget.shadowRoot?.textContent).not.toContain("Сообщение прежнего conversation scope");
+    expect(widget.getAttribute("widget-instance-id")).toBe("shared-mount");
+  });
+
   it("does not start a request after synchronous disconnect and restores a retryable state on reattach", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

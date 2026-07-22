@@ -87,7 +87,10 @@ export class GranitSiteWidgetElement extends LitElement {
     this.syncHostAttributes();
     const photoPreviewEnabled = this.isPhotoPreviewEnabled();
     const sessionBoundaryChanged =
-      previousConfig.widgetInstanceId !== this.config.widgetInstanceId || previousConfig.storage !== this.config.storage;
+      previousConfig.widgetInstanceId !== this.config.widgetInstanceId ||
+      previousConfig.conversationScopeId !== this.config.conversationScopeId ||
+      !sameStringArrays(previousConfig.legacyConversationScopeIds, this.config.legacyConversationScopeIds) ||
+      previousConfig.storage !== this.config.storage;
     const transportBoundaryChanged =
       previousConfig.apiBaseUrl !== this.config.apiBaseUrl ||
       previousConfig.messagesPath !== this.config.messagesPath ||
@@ -99,7 +102,7 @@ export class GranitSiteWidgetElement extends LitElement {
       const wasOpen = this.state.open;
       this.invalidateActiveWork(false);
       this.imageAttachments.clearAll();
-      this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
+      this.sessionStore = this.createConfiguredSessionStore();
       this.publicSessionId = this.sessionStore.getPublicSessionId();
       this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
       this.state = createWidgetState({ config: this.config, open: wasOpen });
@@ -429,7 +432,7 @@ export class GranitSiteWidgetElement extends LitElement {
     if (this.hasBooted) return;
     this.config = readConfigFromElement(this);
     this.syncHostAttributes();
-    this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
+    this.sessionStore = this.createConfiguredSessionStore();
     this.publicSessionId = this.sessionStore.getPublicSessionId();
     this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
     this.imageAttachments.setEnabled(this.isPhotoPreviewEnabled());
@@ -450,6 +453,13 @@ export class GranitSiteWidgetElement extends LitElement {
   private syncHostAttributes(): void {
     if (this.getAttribute("theme") !== this.config.theme) this.setAttribute("theme", this.config.theme);
     if (this.getAttribute("position") !== this.config.position) this.setAttribute("position", this.config.position);
+  }
+
+  private createConfiguredSessionStore(): WidgetSessionStore {
+    return createSessionStore(this.config.widgetInstanceId, this.config.storage, {
+      conversationScopeId: this.config.conversationScopeId,
+      legacyConversationScopeIds: this.config.legacyConversationScopeIds
+    });
   }
 
   private persistOpenState(open: boolean): void {
@@ -928,6 +938,10 @@ export class GranitSiteWidgetElement extends LitElement {
     await this.updateComplete;
     this.renderRoot.querySelector<HTMLButtonElement>(".launcher")?.focus();
   }
+}
+
+function sameStringArrays(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {

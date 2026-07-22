@@ -13,12 +13,33 @@ export type WidgetSessionStore = {
   setPanelSize(panelSize: SiteWidgetPanelSize): void;
 };
 
-export function createSessionStore(widgetInstanceId: string, mode: SiteWidgetStorageMode = "local"): WidgetSessionStore {
-  const publicSessionKey = `sw:${widgetInstanceId}:public_session_id`;
-  const openStateKey = `sw:${widgetInstanceId}:open_state`;
-  const panelSizeKey = `sw:${widgetInstanceId}:panel_size`;
+export type WidgetSessionStoreOptions = {
+  conversationScopeId?: string | undefined;
+  legacyConversationScopeIds?: readonly string[] | undefined;
+};
+
+export function createSessionStore(
+  widgetInstanceId: string,
+  mode: SiteWidgetStorageMode = "local",
+  options: WidgetSessionStoreOptions = {}
+): WidgetSessionStore {
+  const normalizedWidgetInstanceId = normalizeScopeId(widgetInstanceId) || "default";
+  const conversationScopeId = normalizeScopeId(options.conversationScopeId) || normalizedWidgetInstanceId;
+  const legacyConversationScopeIds = normalizeLegacyScopeIds(
+    options.legacyConversationScopeIds,
+    conversationScopeId
+  );
+  const publicSessionKey = `sw:${conversationScopeId}:public_session_id`;
+  const migrationMarkerKey = `sw:${conversationScopeId}:legacy_session_migration_v1`;
+  const legacyPublicSessionKeys = legacyConversationScopeIds.map(
+    (scopeId) => `sw:${scopeId}:public_session_id`
+  );
+  const migrationEnabled = legacyPublicSessionKeys.length > 0;
+  const openStateKey = `sw:${normalizedWidgetInstanceId}:open_state`;
+  const panelSizeKey = `sw:${normalizedWidgetInstanceId}:panel_size`;
   const storage = mode === "memory" ? undefined : getLocalStorage();
   let memoryPublicSessionId = "";
+  let memoryMigrationComplete = false;
   let memoryOpenState: boolean | undefined;
   let memoryPanelSize: SiteWidgetPanelSize | undefined;
 
@@ -27,25 +48,39 @@ export function createSessionStore(widgetInstanceId: string, mode: SiteWidgetSto
       const stored = storageGet(storage, publicSessionKey);
       const normalized = normalizePublicSessionId(stored || memoryPublicSessionId);
 
-      if (!normalized) {
-        memoryPublicSessionId = "";
-        if (stored) storageRemove(storage, publicSessionKey);
-        return "";
+      if (normalized) {
+        memoryPublicSessionId = normalized;
+        if (stored && stored !== normalized) storageSet(storage, publicSessionKey, normalized);
+        markMigrationComplete();
+        return normalized;
       }
 
-      memoryPublicSessionId = normalized;
-      if (stored && stored !== normalized) storageSet(storage, publicSessionKey, normalized);
-      return normalized;
+      memoryPublicSessionId = "";
+      if (stored) storageRemove(storage, publicSessionKey);
+      if (isMigrationComplete()) return "";
+
+      for (const legacyPublicSessionKey of legacyPublicSessionKeys) {
+        const legacySessionId = normalizePublicSessionId(storageGet(storage, legacyPublicSessionKey));
+        if (!legacySessionId) continue;
+        memoryPublicSessionId = legacySessionId;
+        storageSet(storage, publicSessionKey, legacySessionId);
+        markMigrationComplete();
+        return legacySessionId;
+      }
+
+      return "";
     },
     setPublicSessionId(publicSessionId: string) {
       const normalized = normalizePublicSessionId(publicSessionId);
       if (!normalized) return;
       memoryPublicSessionId = normalized;
       storageSet(storage, publicSessionKey, normalized);
+      markMigrationComplete();
     },
     clearPublicSessionId() {
       memoryPublicSessionId = "";
       storageRemove(storage, publicSessionKey);
+      markMigrationComplete();
     },
     getOpenState() {
       const value = storageGet(storage, openStateKey);
@@ -67,6 +102,33 @@ export function createSessionStore(widgetInstanceId: string, mode: SiteWidgetSto
       storageSet(storage, panelSizeKey, panelSize);
     }
   };
+
+  function isMigrationComplete(): boolean {
+    if (!migrationEnabled) return false;
+    return memoryMigrationComplete || storageGet(storage, migrationMarkerKey) === "complete";
+  }
+
+  function markMigrationComplete(): void {
+    if (!migrationEnabled) return;
+    memoryMigrationComplete = true;
+    storageSet(storage, migrationMarkerKey, "complete");
+  }
+}
+
+function normalizeLegacyScopeIds(value: readonly string[] | undefined, canonicalScopeId: string): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>([canonicalScopeId]);
+  for (const candidate of value ?? []) {
+    const scopeId = normalizeScopeId(candidate);
+    if (!scopeId || seen.has(scopeId)) continue;
+    seen.add(scopeId);
+    normalized.push(scopeId);
+  }
+  return normalized;
+}
+
+function normalizeScopeId(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
 function isPanelSize(value: string | undefined): value is SiteWidgetPanelSize {

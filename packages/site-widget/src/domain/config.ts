@@ -41,6 +41,8 @@ export const DEFAULT_WIDGET_CONFIG: SiteWidgetConfig = {
   messagesPath: "/public/intake/site-widget/messages",
   timeoutMs: SITE_WIDGET_DEFAULT_BROWSER_TIMEOUT_MS,
   widgetInstanceId: "default",
+  conversationScopeId: "",
+  legacyConversationScopeIds: [],
   theme: "memorial-soft",
   position: "bottom-right",
   panelSize: "normal",
@@ -90,6 +92,7 @@ const ATTRIBUTE_MAP = {
   "messages-path": "messagesPath",
   "timeout-ms": "timeoutMs",
   "widget-instance-id": "widgetInstanceId",
+  "conversation-scope-id": "conversationScopeId",
   theme: "theme",
   position: "position",
   "panel-size": "panelSize",
@@ -135,6 +138,7 @@ export const OBSERVED_CONFIG_ATTRIBUTES = [
   "config",
   "quick-replies",
   "mobile-actions",
+  "legacy-conversation-scope-ids",
   "open"
 ];
 
@@ -155,13 +159,17 @@ export function normalizeWidgetConfig(input: Partial<SiteWidgetConfig> = {}): Si
   const raw = { ...DEFAULT_WIDGET_CONFIG, ...input };
   const timeoutMs = normalizeSiteWidgetTimeoutMs(raw.timeoutMs);
   const maxMessageLength = toPositiveInteger(raw.maxMessageLength, DEFAULT_WIDGET_CONFIG.maxMessageLength, 10000);
+  const widgetInstanceId = stringValue(raw.widgetInstanceId) || DEFAULT_WIDGET_CONFIG.widgetInstanceId;
+  const conversationScopeId = stringValue(raw.conversationScopeId) || widgetInstanceId;
 
   return {
     ...raw,
     apiBaseUrl: trimTrailingSlash(stringValue(raw.apiBaseUrl)),
     messagesPath: normalizeMessagesPath(raw.messagesPath),
     timeoutMs,
-    widgetInstanceId: stringValue(raw.widgetInstanceId) || DEFAULT_WIDGET_CONFIG.widgetInstanceId,
+    widgetInstanceId,
+    conversationScopeId,
+    legacyConversationScopeIds: normalizeConversationScopeIds(raw.legacyConversationScopeIds, conversationScopeId),
     theme: stringValue(raw.theme) || DEFAULT_WIDGET_CONFIG.theme,
     position: normalizePosition(raw.position),
     panelSize: normalizePanelSize(raw.panelSize),
@@ -217,6 +225,12 @@ export function readConfigFromElement(element: Element): SiteWidgetConfig {
     raw.mobileActions = parseActions(element.getAttribute("mobile-actions") ?? "");
   }
 
+  if (element.hasAttribute("legacy-conversation-scope-ids")) {
+    raw.legacyConversationScopeIds = parseConversationScopeIds(
+      element.getAttribute("legacy-conversation-scope-ids") ?? ""
+    );
+  }
+
   return normalizeWidgetConfig(raw);
 }
 
@@ -227,6 +241,8 @@ export function applyOptionsToElement(element: HTMLElement, options: MountSiteWi
   setAttr(element, "messages-path", normalized.messagesPath);
   setAttr(element, "timeout-ms", String(normalized.timeoutMs));
   setAttr(element, "widget-instance-id", normalized.widgetInstanceId);
+  setAttr(element, "conversation-scope-id", normalized.conversationScopeId);
+  setAttr(element, "legacy-conversation-scope-ids", normalized.legacyConversationScopeIds.join(","));
   setAttr(element, "theme", normalized.theme);
   setAttr(element, "position", normalized.position);
   setAttr(element, "panel-size", normalized.panelSize);
@@ -301,6 +317,29 @@ export function parseActions(value: string): SiteWidgetAction[] {
       .map((label) => ({ type: "open" as const, label: label.trim() }))
       .filter((action) => action.label)
   );
+}
+
+export function parseConversationScopeIds(value: string): string[] {
+  return value.split(",").map(stringValue).filter(Boolean);
+}
+
+export function normalizeConversationScopeIds(value: unknown, canonicalScopeId: string): string[] {
+  const candidates = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? parseConversationScopeIds(value)
+      : [];
+  const normalized: string[] = [];
+  const seen = new Set<string>([canonicalScopeId]);
+
+  for (const candidate of candidates) {
+    const scopeId = stringValue(candidate);
+    if (!scopeId || seen.has(scopeId)) continue;
+    seen.add(scopeId);
+    normalized.push(scopeId);
+  }
+
+  return normalized;
 }
 
 export function normalizeQuickReplies(value: readonly SiteWidgetQuickReply[] = []): SiteWidgetQuickReply[] {

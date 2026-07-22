@@ -50,6 +50,11 @@ describe("site widget domain", () => {
     const element = document.createElement("granit-site-widget");
     element.setAttribute("api-base-url", "https://ops.example.com/");
     element.setAttribute("widget-instance-id", "memorial-main");
+    element.setAttribute("conversation-scope-id", "memorial-customer");
+    element.setAttribute(
+      "legacy-conversation-scope-ids",
+      " memorial-main, memorial-catalog, memorial-main, memorial-customer "
+    );
     element.setAttribute("panel-size", "wide");
     element.setAttribute("quick-replies", "Нужен расчет|Есть вопрос");
 
@@ -57,6 +62,8 @@ describe("site widget domain", () => {
 
     expect(config.apiBaseUrl).toBe("https://ops.example.com");
     expect(config.widgetInstanceId).toBe("memorial-main");
+    expect(config.conversationScopeId).toBe("memorial-customer");
+    expect(config.legacyConversationScopeIds).toEqual(["memorial-main", "memorial-catalog"]);
     expect(config.panelSize).toBe("wide");
     expect(config.quickReplySubmit).toBe("prefill");
     expect(config.quickReplies).toEqual([
@@ -649,9 +656,10 @@ describe("site widget domain", () => {
 
     expect(store.getPublicSessionId()).toBe("");
     expect(localStorage.getItem("sw:empty-session:public_session_id")).toBeNull();
+    expect(localStorage.getItem("sw:empty-session:legacy_session_migration_v1")).toBeNull();
   });
 
-  it("removes legacy sessions and stores only backend UUIDs per widget instance", () => {
+  it("keeps the widget instance as the backward-compatible conversation scope", () => {
     const first = createSessionStore("first");
     const second = createSessionStore("second");
 
@@ -667,6 +675,81 @@ describe("site widget domain", () => {
     expect(second.getPublicSessionId()).toBe(secondSessionId);
     expect(localStorage.getItem("sw:first:public_session_id")).toBe(firstSessionId);
     expect(localStorage.getItem("sw:second:public_session_id")).toBe(secondSessionId);
+  });
+
+  it("uses a canonical conversation scope across distinct widget instances", () => {
+    const main = createSessionStore("landing-main", "local", {
+      conversationScopeId: "landing-customer"
+    });
+    const catalog = createSessionStore("landing-catalog", "local", {
+      conversationScopeId: "landing-customer"
+    });
+
+    main.setPublicSessionId(firstSessionId);
+    expect(catalog.getPublicSessionId()).toBe(firstSessionId);
+    expect(localStorage.getItem("sw:landing-customer:public_session_id")).toBe(firstSessionId);
+
+    main.setOpenState(true);
+    catalog.setOpenState(false);
+    main.setPanelSize("wide");
+    catalog.setPanelSize("fullscreen");
+    expect(localStorage.getItem("sw:landing-main:open_state")).toBe("open");
+    expect(localStorage.getItem("sw:landing-catalog:open_state")).toBe("closed");
+    expect(localStorage.getItem("sw:landing-main:panel_size")).toBe("wide");
+    expect(localStorage.getItem("sw:landing-catalog:panel_size")).toBe("fullscreen");
+  });
+
+  it("migrates the first valid legacy conversation deterministically without deleting aliases", () => {
+    localStorage.setItem("sw:landing-main:public_session_id", firstSessionId);
+    localStorage.setItem("sw:landing-catalog:public_session_id", secondSessionId);
+    const store = createSessionStore("landing-catalog", "local", {
+      conversationScopeId: "landing-customer",
+      legacyConversationScopeIds: [
+        "",
+        "landing-main",
+        "landing-main",
+        "landing-customer",
+        "landing-catalog"
+      ]
+    });
+
+    expect(store.getPublicSessionId()).toBe(firstSessionId);
+    expect(localStorage.getItem("sw:landing-customer:public_session_id")).toBe(firstSessionId);
+    expect(localStorage.getItem("sw:landing-customer:legacy_session_migration_v1")).toBe("complete");
+    expect(localStorage.getItem("sw:landing-main:public_session_id")).toBe(firstSessionId);
+    expect(localStorage.getItem("sw:landing-catalog:public_session_id")).toBe(secondSessionId);
+  });
+
+  it("prefers canonical session and skips invalid legacy values before a valid alias", () => {
+    localStorage.setItem("sw:landing-main:public_session_id", "not-a-uuid");
+    localStorage.setItem("sw:landing-catalog:public_session_id", secondSessionId);
+    const store = createSessionStore("landing-main", "local", {
+      conversationScopeId: "landing-customer",
+      legacyConversationScopeIds: ["landing-main", "landing-catalog"]
+    });
+
+    expect(store.getPublicSessionId()).toBe(secondSessionId);
+
+    localStorage.setItem("sw:landing-customer:public_session_id", firstSessionId);
+    expect(store.getPublicSessionId()).toBe(firstSessionId);
+  });
+
+  it("does not mark an empty migration but never resurrects legacy session after clear", () => {
+    const store = createSessionStore("landing-main", "local", {
+      conversationScopeId: "landing-customer",
+      legacyConversationScopeIds: ["landing-main", "landing-catalog"]
+    });
+
+    expect(store.getPublicSessionId()).toBe("");
+    expect(localStorage.getItem("sw:landing-customer:legacy_session_migration_v1")).toBeNull();
+
+    localStorage.setItem("sw:landing-catalog:public_session_id", secondSessionId);
+    expect(store.getPublicSessionId()).toBe(secondSessionId);
+
+    store.clearPublicSessionId();
+    expect(store.getPublicSessionId()).toBe("");
+    expect(localStorage.getItem("sw:landing-catalog:public_session_id")).toBe(secondSessionId);
+    expect(localStorage.getItem("sw:landing-customer:legacy_session_migration_v1")).toBe("complete");
   });
 
   it("stores the visitor-selected panel size per widget instance", () => {

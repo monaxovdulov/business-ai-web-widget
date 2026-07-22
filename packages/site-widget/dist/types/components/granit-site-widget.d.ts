@@ -31,6 +31,7 @@ export declare class GranitSiteWidgetElement extends LitElement {
     protected updated(): void;
     private boot;
     private syncHostAttributes;
+    private createConfiguredSessionStore;
     private persistOpenState;
     private scheduleDateRollover;
     private clearDateRolloverTimer;

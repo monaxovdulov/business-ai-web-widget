@@ -1,5 +1,5 @@
 import type { MountSiteWidgetOptions } from "../types/public";
-import { parseActions, parseQuickReplies } from "./config";
+import { parseActions, parseConversationScopeIds, parseQuickReplies } from "./config";
 
 export function readLoaderOptions(dataset: DOMStringMap): MountSiteWidgetOptions {
   const options: MountSiteWidgetOptions = {};
@@ -8,6 +8,7 @@ export function readLoaderOptions(dataset: DOMStringMap): MountSiteWidgetOptions
     apiBaseUrl: "apiBaseUrl",
     messagesPath: "messagesPath",
     widgetInstanceId: "widgetInstanceId",
+    conversationScopeId: "conversationScopeId",
     theme: "theme",
     position: "position",
     panelSize: "panelSize",
@@ -58,6 +59,9 @@ export function readLoaderOptions(dataset: DOMStringMap): MountSiteWidgetOptions
 
   if (dataset.quickReplies) options.quickReplies = parseQuickReplies(dataset.quickReplies);
   if (dataset.mobileActions) options.mobileActions = parseActions(dataset.mobileActions);
+  if (dataset.legacyConversationScopeIds) {
+    options.legacyConversationScopeIds = parseConversationScopeIds(dataset.legacyConversationScopeIds);
+  }
 
   return options;
 }
