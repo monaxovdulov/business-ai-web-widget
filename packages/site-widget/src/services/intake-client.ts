@@ -1,4 +1,6 @@
+import { normalizeSiteWidgetTimeoutMs } from "../domain/config";
 import { mapSiteWidgetResponse } from "../domain/response";
+import { normalizePublicSessionId } from "../domain/public-session";
 import type { SiteWidgetConfig, SiteWidgetMessageRequest, SiteWidgetResponseViewModel } from "../types/public";
 
 export async function sendSiteWidgetMessage(
@@ -6,13 +8,15 @@ export async function sendSiteWidgetMessage(
   request: SiteWidgetMessageRequest,
   signal?: AbortSignal
 ): Promise<SiteWidgetResponseViewModel> {
-  if (config.mock) return mockSiteWidgetMessage(config, request);
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (config.mock) return mockSiteWidgetMessage(config, request, signal);
   if (!config.apiBaseUrl) throw new Error("apiBaseUrl is required when mock=false");
 
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), config.timeoutMs);
+  const timeout = globalThis.setTimeout(() => controller.abort(), normalizeSiteWidgetTimeoutMs(config.timeoutMs));
   const abortForwarder = () => controller.abort();
-  signal?.addEventListener("abort", abortForwarder, { once: true });
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", abortForwarder, { once: true });
 
   try {
     const response = await fetch(`${config.apiBaseUrl}${config.messagesPath}`, {
@@ -31,7 +35,12 @@ export async function sendSiteWidgetMessage(
       throw new Error(readErrorMessage(body) ?? `Widget request failed with HTTP ${response.status}`);
     }
 
-    return mapSiteWidgetResponse(body, config);
+    const mapped = mapSiteWidgetResponse(body, config);
+    const requestedPublicSessionId = normalizePublicSessionId(request.public_session_id);
+    if (requestedPublicSessionId && mapped.publicSessionId !== requestedPublicSessionId) {
+      throw new Error("Invalid site_widget.v1 response: public_session_id_mismatch");
+    }
+    return mapped;
   } finally {
     globalThis.clearTimeout(timeout);
     signal?.removeEventListener("abort", abortForwarder);
@@ -40,13 +49,15 @@ export async function sendSiteWidgetMessage(
 
 export async function mockSiteWidgetMessage(
   config: SiteWidgetConfig,
-  request: SiteWidgetMessageRequest
+  request: SiteWidgetMessageRequest,
+  signal?: AbortSignal
 ): Promise<SiteWidgetResponseViewModel> {
-  await delay(350);
+  await delay(350, signal);
   const text = request.message.text.toLowerCase();
 
   if (text.includes("менеджер") || text.includes("позвон")) {
     return {
+      source: "mock",
       status: "fallback",
       publicSessionId: request.public_session_id,
       systemText: "Передали менеджеру. Он свяжется с вами по указанным контактам или ответит здесь.",
@@ -57,6 +68,7 @@ export async function mockSiteWidgetMessage(
 
   if (text.includes("сто") || text.includes("цен") || text.includes("расчет") || text.includes("расчёт")) {
     return {
+      source: "mock",
       status: "replied",
       publicSessionId: request.public_session_id,
       replyText:
@@ -66,6 +78,7 @@ export async function mockSiteWidgetMessage(
   }
 
   return {
+    source: "mock",
     status: "replied",
     publicSessionId: request.public_session_id,
     replyText:
@@ -91,6 +104,18 @@ function readErrorMessage(body: unknown): string | undefined {
       : undefined;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, ms);
+    const handleAbort = () => {
+      globalThis.clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
 }

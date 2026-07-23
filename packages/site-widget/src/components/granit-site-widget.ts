@@ -1,8 +1,17 @@
 import { LitElement, html, nothing, type TemplateResult } from "lit";
+import { repeat } from "lit/directives/repeat.js";
+import { ImageAttachmentController } from "../controllers/image-attachment-controller";
+import { MessageScrollerController } from "../controllers/message-scroller-controller";
 import { normalizeWidgetConfig, OBSERVED_CONFIG_ATTRIBUTES, readConfigFromElement } from "../domain/config";
-import { createIdempotencyKey } from "../domain/ids";
+import { createClientId, createIdempotencyKey } from "../domain/ids";
 import { buildSiteWidgetMessageRequest } from "../domain/request";
-import { applyWidgetAction, createWidgetState, validateDraft, type WidgetState } from "../domain/state";
+import {
+  applyWidgetAction,
+  createWidgetState,
+  validateDraft,
+  type PendingSubmission,
+  type WidgetState
+} from "../domain/state";
 import { buildWidgetViewModel } from "../domain/view-model";
 import { emitSiteWidgetEvent } from "../events/widget-events";
 import { readBrowserEnvironment } from "../services/browser-env";
@@ -12,7 +21,8 @@ import { messageStyles } from "../styles/message.styles";
 import { widgetStyles } from "../styles/widget.styles";
 import type { SiteWidgetAction, SiteWidgetConfig, SiteWidgetContact, SiteWidgetPanelSize } from "../types/public";
 import { widgetIcon } from "../ui/icons";
-import { renderWidgetMessage } from "./widget-message";
+import { renderAttachmentPicker, renderAttachmentPreviewList } from "./widget-attachments";
+import { renderChatItem } from "./widget-message";
 
 export const SITE_WIDGET_TAG_NAME = "granit-site-widget";
 
@@ -37,30 +47,56 @@ export class GranitSiteWidgetElement extends LitElement {
   private hasBooted = false;
   private sessionStore?: WidgetSessionStore;
   private publicSessionId = "";
-  private abortController?: AbortController;
+  private abortController: AbortController | undefined;
+  private operationEpoch = 0;
+  private readonly messageScroller = new MessageScrollerController(this);
+  private readonly imageAttachments = new ImageAttachmentController(this);
+  private sendMessageRequest = sendSiteWidgetMessage;
+  private readonly panelId = createClientId("sw-panel");
+  private readonly titleId = createClientId("sw-title");
+  private readonly phoneCaptureId = createClientId("sw-phone");
 
   override connectedCallback(): void {
+    const reconnecting = this.hasBooted;
     super.connectedCallback();
     this.boot();
+    if (reconnecting) this.requestUpdate();
   }
 
   override disconnectedCallback(): void {
-    this.abortController?.abort();
+    this.invalidateActiveWork(true);
     super.disconnectedCallback();
   }
 
   override attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (oldValue === newValue || !this.hasBooted) return;
 
-    const previousInstanceId = this.config.widgetInstanceId;
-    const previousStorage = this.config.storage;
+    const previousConfig = this.config;
+    const previousPhotoPreviewEnabled = this.isPhotoPreviewEnabled();
     this.config = readConfigFromElement(this);
     this.syncHostAttributes();
+    const photoPreviewEnabled = this.isPhotoPreviewEnabled();
+    const sessionBoundaryChanged =
+      previousConfig.widgetInstanceId !== this.config.widgetInstanceId || previousConfig.storage !== this.config.storage;
+    const transportBoundaryChanged =
+      previousConfig.apiBaseUrl !== this.config.apiBaseUrl ||
+      previousConfig.messagesPath !== this.config.messagesPath ||
+      previousConfig.timeoutMs !== this.config.timeoutMs ||
+      previousConfig.mock !== this.config.mock;
+    const photoBoundaryChanged = previousPhotoPreviewEnabled !== photoPreviewEnabled;
 
-    if (previousInstanceId !== this.config.widgetInstanceId || previousStorage !== this.config.storage) {
+    if (sessionBoundaryChanged) {
+      const wasOpen = this.state.open;
+      this.invalidateActiveWork(false);
+      this.imageAttachments.clearAll();
       this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
       this.publicSessionId = this.sessionStore.getPublicSessionId();
+      this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
+      this.state = createWidgetState({ config: this.config, open: wasOpen });
+    } else if (transportBoundaryChanged || photoBoundaryChanged) {
+      this.invalidateActiveWork(true);
     }
+    this.imageAttachments.setEnabled(photoPreviewEnabled);
 
     if (name === "panel-size") {
       this.panelSize = this.config.panelSize;
@@ -100,8 +136,12 @@ export class GranitSiteWidgetElement extends LitElement {
   }
 
   clearSession(): void {
+    this.invalidateActiveWork(false);
+    this.imageAttachments.clearAll();
+    this.state = applyWidgetAction(this.state, { type: "session.cleared" }, this.config);
     this.sessionStore?.clearPublicSessionId();
     this.publicSessionId = this.sessionStore?.getPublicSessionId() ?? "";
+    this.requestUpdate();
   }
 
   protected override render(): TemplateResult {
@@ -109,6 +149,18 @@ export class GranitSiteWidgetElement extends LitElement {
     const effectivePanelSize = this.getEffectivePanelSize();
     const panelSizeButtonLabel = this.getPanelSizeButtonLabel();
     const panelSizeIconName = effectivePanelSize === "fullscreen" ? "minimize-2" : "maximize-2";
+    const scrollerSnapshot = this.messageScroller.getSnapshot();
+    const photoPreviewEnabled = this.isPhotoPreviewEnabled();
+    const attachmentProcessing = this.imageAttachments.isProcessing();
+    const pendingMessage = view.pending
+      ? view.messages.find((message) => message.id === view.pending?.messageId)
+      : undefined;
+    const liveStatus =
+      pendingMessage?.status === "error"
+        ? this.config.errorMessage
+        : pendingMessage?.status === "pending"
+          ? "Отправляем сообщение."
+          : "";
 
     return html`
       <button
@@ -117,6 +169,7 @@ export class GranitSiteWidgetElement extends LitElement {
         type="button"
         aria-haspopup="dialog"
         aria-expanded=${String(view.open)}
+        aria-controls=${this.panelId}
         ?hidden=${view.open}
         @click=${() => this.open()}
       >
@@ -132,19 +185,20 @@ export class GranitSiteWidgetElement extends LitElement {
       ${this.renderMobileActions(view.showMobileActions)}
 
       <section
+        id=${this.panelId}
         class="panel"
         part="panel"
         data-size=${effectivePanelSize}
         role="dialog"
         aria-modal="false"
-        aria-label=${this.config.headerTitle}
+        aria-labelledby=${this.titleId}
         ?hidden=${!view.open}
         @keydown=${this.handlePanelKeydown}
       >
         <header class="header" part="header">
           <div class="brand-mark" part="brand-mark" aria-hidden="true">${widgetIcon("brand", 24)}</div>
           <div>
-            <h2 class="title" part="title">${this.config.headerTitle}</h2>
+            <h2 id=${this.titleId} class="title" part="title">${this.config.headerTitle}</h2>
             <div class="status" part="status">
               <span class="status__dot" aria-hidden="true"></span>
               <span>${this.config.headerStatus}</span>
@@ -185,8 +239,50 @@ export class GranitSiteWidgetElement extends LitElement {
         </header>
 
         <div class="body" part="body">
-          <div class="messages" part="messages" role="log" aria-live="polite" aria-relevant="additions">
-            ${view.messages.map((message) => renderWidgetMessage(message, this.config))}
+          <div class="message-scroller">
+            <div
+              class="message-viewport"
+              part="message-viewport"
+              role="region"
+              aria-label="Сообщения"
+              tabindex="0"
+            >
+              <div
+                class="messages"
+                part="messages"
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions"
+                aria-busy=${String(view.submitting)}
+              >
+                ${repeat(
+                  view.messages,
+                  (message) => message.id,
+                  (message) => html`<div
+                    class="message-scroller__item"
+                    data-message-id=${message.id}
+                    data-scroll-anchor=${message.role === "visitor" ? "true" : nothing}
+                  >
+                    ${renderChatItem(message, {
+                      config: this.config,
+                      onRetry: this.retryPending,
+                      images: this.imageAttachments.getForMessage(message.id)
+                    })}
+                  </div>`
+                )}
+                <div class="message-scroller__tail" aria-hidden="true"></div>
+              </div>
+            </div>
+            ${scrollerSnapshot.canScrollEnd
+              ? html`<button
+                  class="jump-latest"
+                  part="jump-latest"
+                  type="button"
+                  @click=${() => this.messageScroller.scrollToEnd({ behavior: "smooth" })}
+                >
+                  ${scrollerSnapshot.newItemCount > 0 ? "Новые сообщения" : "К новым сообщениям"}
+                </button>`
+              : nothing}
           </div>
 
           ${view.showQuickReplies
@@ -197,6 +293,7 @@ export class GranitSiteWidgetElement extends LitElement {
                     part="quick-reply"
                     type="button"
                     @click=${() => this.handleQuickReply(reply.text ?? reply.value ?? reply.label)}
+                    @focus=${this.handleQuickReplyFocus}
                   >
                     ${reply.label}
                   </button>`
@@ -206,18 +303,27 @@ export class GranitSiteWidgetElement extends LitElement {
         </div>
 
         <div class="composer-shell" part="composer-shell">
-          <form class="composer" part="composer" @submit=${this.handleSubmit}>
-            <button
-              class="attach-button"
-              part="attach-button"
-              type="button"
-              title=${this.config.attachLabel}
-              aria-label=${this.config.attachLabel}
-              ?hidden=${!view.attachmentVisible}
-              ?disabled=${view.attachmentDisabled}
-            >
-              ${widgetIcon("paperclip")}
-            </button>
+          ${photoPreviewEnabled
+            ? renderAttachmentPreviewList({
+                attachments: this.imageAttachments.getDraft(),
+                validationMessage: this.imageAttachments.getValidationMessage(),
+                validationRevision: this.imageAttachments.getValidationRevision(),
+                onRemove: this.handleRemoveAttachment
+              })
+            : nothing}
+          <form
+            class="composer"
+            part="composer"
+            data-attachments=${String(photoPreviewEnabled)}
+            @submit=${this.handleSubmit}
+          >
+            ${photoPreviewEnabled
+              ? renderAttachmentPicker({
+                  label: this.config.attachLabel,
+                  disabled: attachmentProcessing || view.submitting || Boolean(view.pending),
+                  onFilesSelected: this.handleAttachmentFiles
+                })
+              : nothing}
             <label class="visually-hidden" for="granit-site-widget-message">${this.config.placeholder}</label>
             <textarea
               id="granit-site-widget-message"
@@ -237,21 +343,11 @@ export class GranitSiteWidgetElement extends LitElement {
               part="send-button"
               type="submit"
               aria-label=${this.config.sendLabel}
-              ?disabled=${!view.canSend}
+              ?disabled=${!view.canSend || attachmentProcessing}
             >
               ${widgetIcon("send")}
             </button>
           </form>
-
-          <button
-            class="retry-button"
-            part="retry-button"
-            type="button"
-            ?hidden=${!view.pending || view.submitting}
-            @click=${this.retryPending}
-          >
-            ${this.config.retryLabel}
-          </button>
 
           ${view.showContactTrigger
             ? html`<div class="contact-row" part="contact-row">
@@ -259,13 +355,20 @@ export class GranitSiteWidgetElement extends LitElement {
                   class="contact-trigger"
                   part="phone-trigger"
                   type="button"
+                  aria-expanded=${String(view.contactCaptureOpen)}
+                  aria-controls=${this.phoneCaptureId}
                   @click=${this.toggleContactCapture}
                 >
                   ${widgetIcon("plus", 18)}
                   <span>${view.contactLabel}</span>
                 </button>
               </div>
-              <div class="phone-capture" part="phone-capture" ?hidden=${!view.contactCaptureOpen}>
+              <div
+                id=${this.phoneCaptureId}
+                class="phone-capture"
+                part="phone-capture"
+                ?hidden=${!view.contactCaptureOpen}
+              >
                 <label class="visually-hidden" for="granit-site-widget-phone">${this.config.phoneCaptureLabel}</label>
                 <input
                   id="granit-site-widget-phone"
@@ -286,6 +389,7 @@ export class GranitSiteWidgetElement extends LitElement {
             <span aria-hidden="true">${widgetIcon("shield", 18)}</span>
             <span>${this.config.footerNote}</span>
           </div>
+          <div class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">${liveStatus}</div>
         </div>
       </section>
     `;
@@ -293,7 +397,16 @@ export class GranitSiteWidgetElement extends LitElement {
 
   protected override updated(): void {
     this.autoGrowTextarea();
-    this.scrollMessagesToBottom();
+    const root = this.renderRoot.querySelector<HTMLElement>(".message-scroller");
+    const viewport = this.renderRoot.querySelector<HTMLElement>(".message-viewport");
+    const content = this.renderRoot.querySelector<HTMLElement>(".messages");
+    const tailSpacer = this.renderRoot.querySelector<HTMLElement>(".message-scroller__tail");
+    if (root && viewport && content && tailSpacer) {
+      this.messageScroller.connect({ root, viewport, content, tailSpacer });
+      this.messageScroller.reconcile(
+        this.state.messages.map((message) => ({ id: message.id, scrollAnchor: message.role === "visitor" }))
+      );
+    }
   }
 
   private boot(): void {
@@ -303,6 +416,7 @@ export class GranitSiteWidgetElement extends LitElement {
     this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
     this.publicSessionId = this.sessionStore.getPublicSessionId();
     this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
+    this.imageAttachments.setEnabled(this.isPhotoPreviewEnabled());
 
     const persistedOpen = this.config.persistOpenState ? this.sessionStore.getOpenState() : undefined;
     const initialOpen = this.hasAttribute("open") || (persistedOpen ?? this.config.initialState === "open");
@@ -371,10 +485,6 @@ export class GranitSiteWidgetElement extends LitElement {
       event.preventDefault();
       void this.submitDraft();
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      this.close();
-    }
   };
 
   private handlePanelKeydown = (event: KeyboardEvent): void => {
@@ -395,6 +505,13 @@ export class GranitSiteWidgetElement extends LitElement {
       void this.focusInputSoon();
     }
   }
+
+  private handleQuickReplyFocus = (event: FocusEvent): void => {
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
+    }
+  };
 
   private renderMobileActions(show: boolean): TemplateResult | typeof nothing {
     if (!show) return nothing;
@@ -466,26 +583,51 @@ export class GranitSiteWidgetElement extends LitElement {
   };
 
   private async submitDraft(): Promise<void> {
-    const text = this.state.draft.trim();
-    if (validateDraft(text, this.config) || this.state.submitting) return;
+    if (!this.isConnected) return;
+    const operationEpoch = this.operationEpoch;
+    let text = this.state.draft.trim();
+    if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
+
+    if (this.isPhotoPreviewEnabled() && this.imageAttachments.isProcessing()) {
+      await this.imageAttachments.whenIdle();
+      if (operationEpoch !== this.operationEpoch || !this.isConnected) return;
+      text = this.state.draft.trim();
+      if (validateDraft(text, this.config) || this.state.submitting || this.state.pending) return;
+    }
+
+    if (operationEpoch !== this.operationEpoch || !this.isConnected) return;
 
     const idempotencyKey = createIdempotencyKey(this.publicSessionId);
     this.state = applyWidgetAction(this.state, { type: "submit.started", text, idempotencyKey }, this.config);
+    const pending = this.state.pending;
+    if (!pending || pending.idempotencyKey !== idempotencyKey) return;
+    if (this.isPhotoPreviewEnabled()) this.imageAttachments.transferDraftToMessage(pending.messageId);
     this.requestUpdate();
-    await this.sendPending(text, idempotencyKey);
+    await this.sendPending(pending, operationEpoch);
   }
 
-  private retryPending = async (): Promise<void> => {
-    if (!this.state.pending) return;
-    const { text, idempotencyKey } = this.state.pending;
+  private retryPending = async (messageId?: string): Promise<void> => {
+    if (!this.state.pending || this.state.submitting) return;
+    if (messageId && messageId !== this.state.pending.messageId) return;
+    const pending = this.state.pending;
+    const operationEpoch = this.operationEpoch;
     this.state = applyWidgetAction(this.state, { type: "retry.started" }, this.config);
     this.requestUpdate();
-    await this.sendPending(text, idempotencyKey);
+    await this.sendPending(pending, operationEpoch);
   };
 
-  private async sendPending(text: string, idempotencyKey: string): Promise<void> {
+  private async sendPending(pending: PendingSubmission, operationEpoch: number): Promise<void> {
     this.abortController?.abort();
-    this.abortController = new AbortController();
+    const requestController = new AbortController();
+    this.abortController = requestController;
+    const { messageId, text, idempotencyKey } = pending;
+    const isCurrentRequest = (): boolean =>
+      this.operationEpoch === operationEpoch &&
+      this.abortController === requestController &&
+      !requestController.signal.aborted &&
+      this.isConnected &&
+      this.state.pending?.messageId === messageId &&
+      this.state.pending.idempotencyKey === idempotencyKey;
 
     try {
       const request = buildSiteWidgetMessageRequest({
@@ -502,18 +644,43 @@ export class GranitSiteWidgetElement extends LitElement {
         publicSessionId: this.publicSessionId,
         messageText: text
       });
+      if (!isCurrentRequest()) return;
 
-      const response = await sendSiteWidgetMessage(this.config, request, this.abortController.signal);
+      const response = await this.sendMessageRequest(this.config, request, requestController.signal);
+      if (!isCurrentRequest()) return;
 
-      if (response.publicSessionId) {
+      if (response.source === "server") {
+        if (this.publicSessionId && response.publicSessionId !== this.publicSessionId) {
+          throw new Error("Invalid site_widget.v1 response: public_session_id_mismatch");
+        }
         this.publicSessionId = response.publicSessionId;
         this.sessionStore?.setPublicSessionId(response.publicSessionId);
+        this.state = applyWidgetAction(
+          this.state,
+          {
+            type: "visitor.saved",
+            messageId,
+            publicMessageId: response.publicMessageId,
+            acceptanceStatus: response.acceptanceStatus
+          },
+          this.config
+        );
+      } else {
+        this.state = applyWidgetAction(this.state, { type: "visitor.mocked", messageId }, this.config);
       }
 
-      this.state = applyWidgetAction(this.state, { type: "visitor.persisted", text }, this.config);
-
-      if (response.status === "replied" && response.replyText) {
-        this.state = applyWidgetAction(this.state, { type: "assistant.replied", text: response.replyText }, this.config);
+      if (response.status === "replied") {
+        if (!response.replyText) throw new Error("Widget replied response is missing reply text");
+        this.state = applyWidgetAction(
+          this.state,
+          {
+            type: "assistant.replied",
+            text: response.replyText,
+            publicMessageId: response.source === "server" ? response.replyPublicMessageId : undefined,
+            disclosureText: response.source === "server" ? response.disclosureText : undefined
+          },
+          this.config
+        );
       } else {
         const status = response.status === "disabled" ? "disabled" : "fallback";
         this.state = applyWidgetAction(
@@ -523,22 +690,44 @@ export class GranitSiteWidgetElement extends LitElement {
         );
         emitSiteWidgetEvent(this, "fallback-shown", this.config, {
           status,
-          reason: response.reason ?? ""
+          reason: response.status === "fallback" && "reason" in response ? response.reason ?? "" : ""
         });
       }
 
       emitSiteWidgetEvent(this, "response-received", this.config, {
         status: response.status,
-        reason: response.reason ?? ""
+        acceptanceStatus: response.source === "server" ? response.acceptanceStatus : "mock",
+        reason: response.status === "fallback" && "reason" in response ? response.reason ?? "" : ""
       });
       this.requestUpdate();
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      this.state = applyWidgetAction(this.state, { type: "submit.failed", text: this.config.errorMessage }, this.config);
+      if (error instanceof DOMException && error.name === "AbortError" && requestController.signal.aborted) return;
+      if (!isCurrentRequest()) return;
+      this.state = applyWidgetAction(
+        this.state,
+        { type: "submit.failed", text: this.config.errorMessage, messageId },
+        this.config
+      );
       emitSiteWidgetEvent(this, "error", this.config, {
         errorMessage: error instanceof Error ? error.message : String(error)
       });
       this.requestUpdate();
+    } finally {
+      if (this.abortController === requestController) this.abortController = undefined;
+    }
+  }
+
+  private invalidateActiveWork(markPendingAsError: boolean): void {
+    this.operationEpoch += 1;
+    const activeController = this.abortController;
+    this.abortController = undefined;
+    activeController?.abort();
+    if (markPendingAsError && this.state.pending && this.state.submitting) {
+      this.state = applyWidgetAction(
+        this.state,
+        { type: "submit.failed", text: this.config.errorMessage, messageId: this.state.pending.messageId },
+        this.config
+      );
     }
   }
 
@@ -547,16 +736,32 @@ export class GranitSiteWidgetElement extends LitElement {
     return phone ? { phone, preferred_contact: "phone" } : undefined;
   }
 
+  private isPhotoPreviewEnabled(): boolean {
+    return this.config.mock && this.config.attachmentsEnabled && this.config.showAttachmentSlot;
+  }
+
+  private handleAttachmentFiles = async (files: readonly File[]): Promise<void> => {
+    if (!this.isPhotoPreviewEnabled()) return;
+    await this.imageAttachments.selectFiles(files);
+  };
+
+  private handleRemoveAttachment = (attachmentId: string): void => {
+    const focusTarget = this.imageAttachments.removeDraft(attachmentId);
+    void this.updateComplete.then(() => {
+      const target = focusTarget
+        ? [...this.renderRoot.querySelectorAll<HTMLButtonElement>("[data-attachment-id]")].find(
+            (button) => button.dataset.attachmentId === focusTarget
+          )
+        : this.renderRoot.querySelector<HTMLButtonElement>(".attach-button");
+      target?.focus();
+    });
+  };
+
   private autoGrowTextarea(): void {
     const textarea = this.renderRoot.querySelector<HTMLTextAreaElement>(".textarea");
     if (!textarea) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 118)}px`;
-  }
-
-  private scrollMessagesToBottom(): void {
-    const messages = this.renderRoot.querySelector<HTMLElement>(".messages");
-    if (messages) messages.scrollTop = messages.scrollHeight;
   }
 
   private async focusInputSoon(): Promise<void> {

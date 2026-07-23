@@ -1,0 +1,471 @@
+name: Site Widget Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (site-widget-v<package.version>)
+        required: true
+        type: string
+      publish_package:
+        description: Publish the private package to GitHub Packages
+        required: false
+        default: false
+        type: boolean
+      create_github_release:
+        description: Create the GitHub Release and attach validated artifacts
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: site-widget-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate tag and release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.release_metadata.outputs.artifact_name }}
+      checksum_name: ${{ steps.release_metadata.outputs.checksum_name }}
+      commit_sha: ${{ steps.release_metadata.outputs.commit_sha }}
+      package_name: ${{ steps.release_metadata.outputs.package_name }}
+      package_version: ${{ steps.release_metadata.outputs.package_version }}
+      report_name: ${{ steps.release_metadata.outputs.report_name }}
+      tag: ${{ steps.release_metadata.outputs.tag }}
+      zip_name: ${{ steps.release_metadata.outputs.zip_name }}
+
+    steps:
+      - name: Check out selected dispatch ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.14.0
+          cache: npm
+          cache-dependency-path: packages/site-widget/package-lock.json
+
+      - name: Verify Node.js and npm versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version="$(node --version)"
+          npm_version="$(npm --version)"
+          test "$node_version" = "v24.14.0"
+          test "${npm_version%%.*}" = "11"
+          printf 'Node.js %s, npm %s\n' "$node_version" "$npm_version"
+
+      - name: Validate dispatch tag and source commit
+        id: release_metadata
+        shell: bash
+        working-directory: packages/site-widget
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          package_name="$(node -e "const p = require('./package.json'); process.stdout.write(p.name ?? '')")"
+          package_version="$(node -e "const p = require('./package.json'); process.stdout.write(p.version ?? '')")"
+          if [[ "$package_name" != "@monaxovdulov/site-widget" ]]; then
+            echo "Expected package @monaxovdulov/site-widget, found: $package_name" >&2
+            exit 1
+          fi
+          if [[ ! "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "package.json contains an unsupported release version: $package_version" >&2
+            exit 1
+          fi
+
+          expected_tag="site-widget-v${package_version}"
+          expected_ref="refs/tags/${INPUT_TAG}"
+          if [[ "$INPUT_TAG" != "$expected_tag" ]]; then
+            echo "Input tag must be $expected_tag, found: $INPUT_TAG" >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_REF" != "$expected_ref" ]]; then
+            echo "Dispatch ref must be $expected_ref, found: $DISPATCH_REF" >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "$expected_ref"; then
+            echo "Tag ref is missing from the checkout: $expected_ref" >&2
+            exit 1
+          fi
+          tag_type="$(git cat-file -t "$expected_ref")"
+          if [[ "$tag_type" != "tag" ]]; then
+            echo "Release tag must be annotated; $expected_ref resolves to object type: $tag_type" >&2
+            exit 1
+          fi
+
+          head_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+          tag_sha="$(git rev-parse --verify "${expected_ref}^{commit}")"
+          dispatch_sha="$(git rev-parse --verify "${DISPATCH_SHA}^{commit}")"
+          if [[ "$head_sha" != "$tag_sha" || "$head_sha" != "$dispatch_sha" ]]; then
+            printf 'Release source mismatch: HEAD=%s tag=%s dispatch=%s\n' \
+              "$head_sha" "$tag_sha" "$dispatch_sha" >&2
+            exit 1
+          fi
+
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "Checkout is missing refs/remotes/origin/main" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$head_sha" refs/remotes/origin/main; then
+            echo "Release commit $head_sha is not merged into origin/main" >&2
+            exit 1
+          fi
+
+          zip_name="granit-site-widget-v${package_version}.zip"
+          checksum_name="${zip_name}.sha256"
+          report_name="package-composition.json"
+          artifact_name="site-widget-release-${INPUT_TAG}"
+
+          {
+            echo "artifact_name=$artifact_name"
+            echo "checksum_name=$checksum_name"
+            echo "commit_sha=$head_sha"
+            echo "package_name=$package_name"
+            echo "package_version=$package_version"
+            echo "report_name=$report_name"
+            echo "tag=$INPUT_TAG"
+            echo "zip_name=$zip_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        working-directory: packages/site-widget
+        run: npm ci
+
+      - name: Install Playwright Chromium and system dependencies
+        working-directory: packages/site-widget
+        run: npx playwright install --with-deps chromium
+
+      - name: Check types
+        working-directory: packages/site-widget
+        run: npm run check
+
+      - name: Run unit and component tests
+        working-directory: packages/site-widget
+        run: npm test
+
+      - name: Build production bundles
+        working-directory: packages/site-widget
+        run: npm run build
+
+      - name: Run browser tests
+        working-directory: packages/site-widget
+        env:
+          CI: "true"
+        run: npm run test:browser
+
+      - name: Verify npm package composition and consumer install
+        working-directory: packages/site-widget
+        run: node scripts/verify-package.mjs
+
+      - name: Build clean runtime release candidate
+        working-directory: packages/site-widget
+        run: node scripts/build-runtime-release.mjs
+
+      - name: Smoke-test runtime ZIP over HTTP
+        working-directory: packages/site-widget
+        run: node scripts/smoke-runtime-http.mjs
+
+      - name: Verify exact release artifact set
+        shell: bash
+        working-directory: packages/site-widget
+        env:
+          CHECKSUM_NAME: ${{ steps.release_metadata.outputs.checksum_name }}
+          PACKAGE_NAME: ${{ steps.release_metadata.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release_metadata.outputs.package_version }}
+          REPORT_NAME: ${{ steps.release_metadata.outputs.report_name }}
+          ZIP_NAME: ${{ steps.release_metadata.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          test -s "release-artifacts/$ZIP_NAME"
+          test -s "release-artifacts/$CHECKSUM_NAME"
+          test -s "release-artifacts/$REPORT_NAME"
+          test -s RELEASE.md
+
+          mapfile -t actual_files < <(
+            find release-artifacts -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort
+          )
+          mapfile -t expected_files < <(printf '%s\n' "$CHECKSUM_NAME" "$REPORT_NAME" "$ZIP_NAME" | LC_ALL=C sort)
+          if [[ "${actual_files[*]}" != "${expected_files[*]}" ]]; then
+            printf 'Unexpected release-artifacts contents. Expected: %s; found: %s\n' \
+              "${expected_files[*]}" "${actual_files[*]}" >&2
+            exit 1
+          fi
+
+          (
+            cd release-artifacts
+            sha256sum --check "$CHECKSUM_NAME"
+          )
+
+          node --input-type=module - "$PACKAGE_NAME" "$PACKAGE_VERSION" "release-artifacts/$REPORT_NAME" <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const [, , expectedName, expectedVersion, reportPath] = process.argv;
+          const report = JSON.parse(await readFile(reportPath, "utf8"));
+          if (
+            report.ok !== true ||
+            report.package?.name !== expectedName ||
+            report.package?.version !== expectedVersion
+          ) {
+            throw new Error(`Package report does not match ${expectedName}@${expectedVersion}`);
+          }
+          NODE
+
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.release_metadata.outputs.artifact_name }}
+          path: |
+            packages/site-widget/release-artifacts/${{ steps.release_metadata.outputs.zip_name }}
+            packages/site-widget/release-artifacts/${{ steps.release_metadata.outputs.checksum_name }}
+            packages/site-widget/release-artifacts/${{ steps.release_metadata.outputs.report_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish private GitHub Package
+    if: ${{ inputs.publish_package }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: site-widget-release
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out validated release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate immutable release source
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.validate.outputs.commit_sha }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+          tag_sha="$(git rev-parse --verify "refs/tags/${TAG}^{commit}")"
+          test "$head_sha" = "$EXPECTED_SHA"
+          test "$tag_sha" = "$EXPECTED_SHA"
+
+      - name: Set up Node.js for GitHub Packages
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.14.0
+          cache: npm
+          cache-dependency-path: packages/site-widget/package-lock.json
+          registry-url: https://npm.pkg.github.com
+          scope: "@monaxovdulov"
+
+      - name: Verify package metadata
+        working-directory: packages/site-widget
+        env:
+          EXPECTED_NAME: ${{ needs.validate.outputs.package_name }}
+          EXPECTED_VERSION: ${{ needs.validate.outputs.package_version }}
+        run: |
+          node -e '
+            const p = require("./package.json");
+            if (p.name !== process.env.EXPECTED_NAME || p.version !== process.env.EXPECTED_VERSION) {
+              throw new Error(`Expected ${process.env.EXPECTED_NAME}@${process.env.EXPECTED_VERSION}, found ${p.name}@${p.version}`);
+            }
+          '
+
+      - name: Install dependencies
+        working-directory: packages/site-widget
+        run: npm ci
+
+      - name: Build package for publication
+        working-directory: packages/site-widget
+        run: npm run build
+
+      - name: Publish package
+        shell: bash
+        working-directory: packages/site-widget
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          REGISTRY_URL: https://npm.pkg.github.com
+        run: |
+          set -euo pipefail
+          publish_args=(--ignore-scripts --access restricted --registry "$REGISTRY_URL")
+          if [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]] && \
+            npm publish --help | grep -q -- '--provenance'; then
+            publish_args+=(--provenance)
+          else
+            echo "::notice::Publishing without provenance because OIDC provenance is not available for this job and registry."
+          fi
+          npm publish "${publish_args[@]}"
+
+      - name: Install and inspect exact published version
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          PACKAGE_NAME: ${{ needs.validate.outputs.package_name }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cd "$consumer"
+          npm init --yes >/dev/null
+          npm pkg set private=true >/dev/null
+          cat > .npmrc <<'NPMRC'
+          registry=https://registry.npmjs.org/
+          @monaxovdulov:registry=https://npm.pkg.github.com/
+          //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+          NPMRC
+          npm install \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund \
+            --save-exact \
+            "${PACKAGE_NAME}@${PACKAGE_VERSION}"
+          npm ls --depth=0 "${PACKAGE_NAME}@${PACKAGE_VERSION}"
+
+      - name: Verify GitHub Package remains private
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          visibility="$(
+            gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/npm/site-widget" --jq .visibility
+          )"
+          if [[ "$visibility" != "private" ]]; then
+            echo "Expected GitHub Package visibility private, found: $visibility" >&2
+            exit 1
+          fi
+
+  release:
+    name: Create GitHub Release
+    if: >-
+      ${{
+        always() &&
+        inputs.create_github_release &&
+        needs.validate.result == 'success' &&
+        (!inputs.publish_package || needs.publish.result == 'success')
+      }}
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: site-widget-release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out validated release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate immutable release source and notes
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.validate.outputs.commit_sha }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+          tag_sha="$(git rev-parse --verify "refs/tags/${TAG}^{commit}")"
+          test "$head_sha" = "$EXPECTED_SHA"
+          test "$tag_sha" = "$EXPECTED_SHA"
+          test -s packages/site-widget/RELEASE.md
+
+      - name: Download validated release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.validate.outputs.artifact_name }}
+          path: release-artifacts
+
+      - name: Verify downloaded release artifacts
+        shell: bash
+        env:
+          CHECKSUM_NAME: ${{ needs.validate.outputs.checksum_name }}
+          PACKAGE_NAME: ${{ needs.validate.outputs.package_name }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.package_version }}
+          REPORT_NAME: ${{ needs.validate.outputs.report_name }}
+          ZIP_NAME: ${{ needs.validate.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          test -s "release-artifacts/$ZIP_NAME"
+          test -s "release-artifacts/$CHECKSUM_NAME"
+          test -s "release-artifacts/$REPORT_NAME"
+
+          mapfile -t actual_files < <(
+            find release-artifacts -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort
+          )
+          mapfile -t expected_files < <(printf '%s\n' "$CHECKSUM_NAME" "$REPORT_NAME" "$ZIP_NAME" | LC_ALL=C sort)
+          if [[ "${actual_files[*]}" != "${expected_files[*]}" ]]; then
+            printf 'Unexpected downloaded artifact contents. Expected: %s; found: %s\n' \
+              "${expected_files[*]}" "${actual_files[*]}" >&2
+            exit 1
+          fi
+
+          (
+            cd release-artifacts
+            sha256sum --check "$CHECKSUM_NAME"
+          )
+
+          node --input-type=module - "$PACKAGE_NAME" "$PACKAGE_VERSION" "release-artifacts/$REPORT_NAME" <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const [, , expectedName, expectedVersion, reportPath] = process.argv;
+          const report = JSON.parse(await readFile(reportPath, "utf8"));
+          if (
+            report.ok !== true ||
+            report.package?.name !== expectedName ||
+            report.package?.version !== expectedVersion
+          ) {
+            throw new Error(`Package report does not match ${expectedName}@${expectedVersion}`);
+          }
+          NODE
+
+      - name: Create release only when absent
+        shell: bash
+        env:
+          CHECKSUM_NAME: ${{ needs.validate.outputs.checksum_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPORT_NAME: ${{ needs.validate.outputs.report_name }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          ZIP_NAME: ${{ needs.validate.outputs.zip_name }}
+        run: |
+          set -euo pipefail
+          existing_release_ids="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"${TAG}\") | .id"
+          )"
+          if [[ -n "$existing_release_ids" ]]; then
+            echo "GitHub Release already exists for $TAG; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-file packages/site-widget/RELEASE.md \
+            "release-artifacts/$ZIP_NAME" \
+            "release-artifacts/$CHECKSUM_NAME" \
+            "release-artifacts/$REPORT_NAME"

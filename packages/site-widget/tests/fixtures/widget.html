@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Granit Site Widget browser fixture</title>
+    <style>
+      :root {
+        color: #2f2d2a;
+        font-family: Arial, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        overflow-x: hidden;
+      }
+
+      body {
+        background:
+          radial-gradient(circle at 18% 18%, rgba(138, 111, 85, 0.12), transparent 34%),
+          linear-gradient(180deg, #f7f3ee 0%, #fffdfa 72%);
+        min-height: 100vh;
+      }
+
+      main {
+        max-width: 820px;
+        padding: clamp(28px, 7vw, 80px) clamp(20px, 6vw, 72px);
+      }
+
+      h1 {
+        font-size: clamp(30px, 5vw, 54px);
+        line-height: 1.08;
+        margin: 0 0 20px;
+        max-width: 720px;
+      }
+
+      p {
+        color: #5f5952;
+        font-size: 18px;
+        line-height: 1.55;
+        margin: 0;
+        max-width: 620px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Мемориальная мастерская</h1>
+      <p>Детерминированная локальная страница для browser-, accessibility- и visual-проверок виджета.</p>
+    </main>
+
+    <script type="module">
+      import "/src/site-widget.esm.ts";
+
+      const parameters = new URLSearchParams(window.location.search);
+      const widget = document.createElement("granit-site-widget");
+      widget.setAttribute("widget-instance-id", `browser-${parameters.get("scenario") || "default"}`);
+      widget.setAttribute("storage", "memory");
+      widget.setAttribute("api-base-url", `${window.location.origin}/api`);
+
+      if (parameters.get("open") === "1") widget.setAttribute("open", "");
+      if (parameters.get("mock") === "1") widget.setAttribute("mock", "true");
+      if (parameters.get("attachments") === "1") {
+        widget.setAttribute("attachments-enabled", "true");
+        widget.setAttribute("show-attachment-slot", "true");
+      }
+
+      const panelSize = parameters.get("panel-size");
+      if (panelSize) widget.setAttribute("panel-size", panelSize);
+
+      document.body.appendChild(widget);
+      await widget.updateComplete;
+
+      window.widgetFixture = { widget };
+    </script>
+  </body>
+</html>

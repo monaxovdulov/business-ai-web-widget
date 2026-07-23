@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Granit Site Widget Mock Photo Preview</title>
+    <style>
+      body {
+        background: #f4efe9;
+        color: #2f2d2a;
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        min-height: 100vh;
+        padding: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Локальная проверка mock-фото</h1>
+    <p>
+      Этот пример работает только локально после <code>npm run build</code> и
+      <code>npm run serve:local</code>; production v1 остаётся text-only.
+    </p>
+
+    <script type="module" src="/site-widget/v1/site-widget.esm.js"></script>
+    <granit-site-widget
+      open
+      mock="true"
+      attachments-enabled="true"
+      show-attachment-slot="true"
+      storage="memory"
+      widget-instance-id="mock-photo-preview">
+    </granit-site-widget>
+  </body>
+</html>

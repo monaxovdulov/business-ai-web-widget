@@ -39,7 +39,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`@granit/site-widget local server: http://${host}:${port}/`);
+  console.log(`@monaxovdulov/site-widget local server: http://${host}:${port}/`);
 });
 
 function resolvePath(pathname) {
@@ -59,7 +59,7 @@ async function readLocalIndex() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>@granit/site-widget local smoke</title>
+    <title>@monaxovdulov/site-widget local smoke</title>
     <style>
       body {
         margin: 0;
@@ -79,7 +79,7 @@ async function readLocalIndex() {
   </head>
   <body>
     <main>
-      <h1>@granit/site-widget</h1>
+      <h1>@monaxovdulov/site-widget</h1>
       <p>${escapeHtml(firstParagraph)}</p>
       <p><a href="/examples/plain-html.html">Plain HTML canonical example</a></p>
     </main>

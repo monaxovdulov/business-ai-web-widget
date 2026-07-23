@@ -1,7 +1,7 @@
 # Site Widget Design
 
-Status: proposed
-Version: `site_widget_design.v1`
+Status: implemented
+Version: `site_widget_design.v1.1`
 Scope: portable visual and interaction contract for the public website widget
 
 ## 1. Design intent
@@ -39,10 +39,16 @@ SiteWidgetRoot
       ResizeButton
       MinimizeButton
       CloseButton
-    MessageList
-      AssistantMessage
-      VisitorMessage
-      SystemMessage
+    MessageScroller
+      MessageViewport
+        MessageLog
+          MessageRoot
+            MessageBubble
+            MessageMeta
+            MessageActions
+          Marker
+          TailSpacer
+      JumpToLatest
     QuickReplies
       QuickReplyButton
     Composer
@@ -71,7 +77,7 @@ SiteWidgetRoot
 | `replied` | Assistant message appears with disclosure if backend returned AI reply. |
 | `fallback` | Manager handoff message appears. |
 | `disabled` | Manager review message appears. |
-| `error` | Retry-safe error message appears; visitor draft is not discarded. |
+| `error` | The pending visitor bubble shows one inline retry; no duplicate system error is added. |
 | `closed_with_unread` | Launcher badge visible if new assistant or system message arrived while closed. |
 
 ## 5. Copy defaults
@@ -100,8 +106,8 @@ Copy can be overridden per landing. Copy changes do not require component code c
 |---|---:|---|
 | `size.launcher.height` | `64px` | Closed button height. |
 | `size.launcher.minWidth` | `184px` | Closed button minimum width. |
-| `size.panel.width` | `640px` | Desktop panel width. |
-| `size.panel.wideWidth` | `860px` | Desktop wide panel width. |
+| `size.panel.width` | `520px` | Desktop normal panel width. |
+| `size.panel.wideWidth` | `640px` | Desktop wide panel width. |
 | `size.panel.fullscreenInset` | `24px` | Desktop fullscreen panel inset. |
 | `size.panel.maxHeight` | `min(760px, calc(100vh - 48px))` | Desktop panel height limit. |
 | `size.mobile.panelWidth` | `calc(100vw - 24px)` | Mobile panel width. |
@@ -129,14 +135,14 @@ Copy can be overridden per landing. Copy changes do not require component code c
 |---|---|---|
 | `color.text.primary` | `#2f2d2a` | Main text. |
 | `color.text.secondary` | `#716d67` | Status and notes. |
-| `color.text.muted` | `#9b948c` | Time, placeholders. |
+| `color.text.muted` | `#766f68` | Time and placeholders with readable contrast. |
 | `color.surface.pageOverlay` | `rgba(255, 252, 248, 0.72)` | Optional soft overlay behind panel. |
 | `color.surface.panel` | `#fffdf9` | Panel background. |
 | `color.surface.messageAssistant` | `#ffffff` | Assistant bubble. |
 | `color.surface.messageVisitor` | `#f1e7dd` | Visitor bubble. |
 | `color.surface.control` | `#ffffff` | Input and secondary buttons. |
 | `color.border.soft` | `rgba(55, 48, 40, 0.10)` | Dividers and outlines. |
-| `color.accent` | `#a98b6d` | Launcher and send button. |
+| `color.accent` | `#8a6f55` | Launcher and send button; AA contrast against white. |
 | `color.accentText` | `#ffffff` | Text on accent. |
 | `color.online` | `#68c75a` | Online dot. |
 | `color.error` | `#b84b3f` | Error text. |
@@ -240,21 +246,48 @@ launcher-icon
 launcher-label
 panel
 header
+header-actions
 brand-mark
 title
 status
 minimize-button
 resize-button
 close-button
+body
 messages
+message
 message-assistant
 message-visitor
+message-system
+message-disclosure
+retry-button
+message-root
+message-bubble
+message-meta
+message-status
+message-actions
+marker
+marker-icon
+marker-text
+message-viewport
+jump-latest
+attachment-list
+attachment
+attachment-preview
+attachment-remove
 quick-replies
 quick-reply
+composer-shell
 composer
+attach-button
+input
 textarea
 send-button
+contact-row
+phone-trigger
+phone-capture
 phone-field
+phone-save-button
 footer-note
 mobile-actions
 mobile-action
@@ -267,7 +300,7 @@ mobile-action
   "schema_version": "site_widget_theme.v1",
   "name": "memorial-soft",
   "tokens": {
-    "color.accent": "#a98b6d",
+    "color.accent": "#8a6f55",
     "color.surface.panel": "#fffdf9",
     "color.surface.messageVisitor": "#f1e7dd",
     "color.text.primary": "#2f2d2a",
@@ -298,7 +331,7 @@ right: max(24px, env(safe-area-inset-right))
 Panel:
 
 ```text
-width: min(640px, calc(100vw - 48px))
+width: min(var(--sw-panel-normal-width, 520px), calc(100vw - 48px))
 max-height: min(760px, calc(100vh - 48px))
 ```
 
@@ -379,9 +412,9 @@ When panel is open, the mobile action rail is hidden.
 | Response status | Bubble text source | Visual status |
 |---|---|---|
 | `replied` | `automation.reply.text` | Assistant bubble with AI disclosure. |
-| `fallback` | configured fallback text plus backend reason if safe to show | System/assistant bubble. |
-| `disabled` | configured manager review text | System/assistant bubble. |
-| network error | local error copy | Error bubble with retry. |
+| `fallback` | configured fallback text plus backend reason if safe to show | Neutral Marker. |
+| `disabled` | configured manager review text | Neutral Marker. |
+| network error | configured detailed copy in an atomic live region | Existing visitor bubble with one inline retry. |
 
 AI disclosure default:
 
@@ -395,10 +428,10 @@ AI disclosure default:
 - Panel has `role="dialog"`.
 - Close button label: `Закрыть виджет`.
 - Minimize button label: `Свернуть виджет`.
-- Message list uses `aria-live="polite"` for assistant/system responses.
+- A focusable labelled region contains a `role="log"` transcript and an atomic status live region.
 - Input label is available for screen readers.
-- Focus is trapped only on mobile full-height mode; desktop panel allows page interaction.
-- Escape closes or minimizes panel depending on config.
+- Focus is never trapped; the dialog is non-modal and Escape returns focus to the launcher.
+- Escape closes the panel.
 - All clickable controls are at least `44px` high.
 - Focus ring uses `color.accent` with sufficient contrast.
 
@@ -416,7 +449,7 @@ AI disclosure default:
 
 ```css
 granit-site-widget[theme="memorial-soft"] {
-  --sw-color-accent: #a98b6d;
+  --sw-color-accent: #8a6f55;
   --sw-color-surface-panel: #fffdf9;
   --sw-color-surface-message-visitor: #f1e7dd;
   --sw-color-text-primary: #2f2d2a;
@@ -440,7 +473,7 @@ granit-site-widget[theme="minimal-dark-accent"] {
 
 ```css
 granit-site-widget[theme="light-catalog"] {
-  --sw-color-accent: #7c8a6a;
+  --sw-color-accent: #647252;
   --sw-color-surface-panel: #fbfbf7;
   --sw-color-surface-message-visitor: #e9eee2;
   --sw-color-text-primary: #252821;
@@ -460,3 +493,51 @@ granit-site-widget[theme="light-catalog"] {
 - Theme override does not require rebuilding widget code.
 - Copy can be changed per landing.
 - Layout works on light image backgrounds and plain solid backgrounds.
+
+## 24. MessageScroller contract
+
+- Stable message IDs key every transcript row.
+- The viewport follows the bottom only while it is already at the live edge (8px threshold).
+- Wheel, touch, scroll keys, scrollbar interaction, and explicit message jumps release follow mode.
+- A new visitor turn anchors at a 40px reading line. Its tail spacer is consumed as the reply grows.
+- Prepending history preserves the first visible stable ID and viewport-relative offset.
+- Resize and reopen preserve free-reading mode; reduced motion changes explicit smooth jumps to `auto`.
+- Resize/listener/observer state is runtime-only and is disconnected with the host.
+
+## 25. Mock-only photo boundary
+
+The picker is rendered only for `mock && attachmentsEnabled && showAttachmentSlot`.
+Production `site_widget.v1` is always text-only and renders no disabled or future-photo promise.
+
+Mock preview rules:
+
+- up to three JPEG, PNG, or WebP files;
+- 5 MiB per file, 15 MiB total, and 24 million decoded pixels;
+- signature, declared MIME, and decoder validation;
+- partial batch acceptance with one consolidated error;
+- text remains mandatory;
+- object URLs are revoked on remove, config switch, clear, disconnect, and cancelled in-flight work;
+- `File`, filename, MIME, size, and `blob:` URL never enter requests, events, storage, `WidgetState`, or `WidgetMessage`.
+
+Production photos are deferred to an upload endpoint plus `site_widget.v2`, which should carry only
+opaque normalized `upload_id` references.
+
+## 26. AI-agnostic frontend boundary
+
+The backend/AI layer owns prompts, qualification fields, question count, completion criteria, and
+manager handoff. The widget has no workflow state for those concepts. It only sends visitor text and
+renders backend-confirmed messages and safe automation states.
+
+## 27. Verification
+
+The package gate is:
+
+```text
+npm run check
+npm test
+npm run build
+npm run test:browser
+```
+
+Playwright covers MessageScroller layout, retry, strict v1 payloads, mock photos, accessibility,
+desktop/mobile/landscape geometry, keyboard flow, and visual screenshots.

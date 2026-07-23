@@ -1,12 +1,22 @@
 {
-  "name": "@granit/site-widget",
+  "name": "@monaxovdulov/site-widget",
   "version": "1.0.0",
   "type": "module",
   "description": "Production Lit hybrid site widget exposed as a Web Component.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monaxovdulov/business-ai-web-widget.git",
+    "directory": "packages/site-widget"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
   "files": [
     "dist",
     "design.md",
     "README.md",
+    "RELEASE.md",
     "design-tokens.json",
     "examples"
   ],
@@ -31,8 +41,15 @@
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "build": "npm run clean && node scripts/build.mjs && tsc -p tsconfig.types.json && node scripts/prepare-dist.mjs",
+    "prepack": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:browser": "playwright test",
+    "test:all": "npm run check && npm test && npm run build && npm run test:browser",
+    "verify:package": "node scripts/verify-package.mjs",
+    "release:runtime": "node scripts/build-runtime-release.mjs",
+    "smoke:runtime": "node scripts/smoke-runtime-http.mjs",
+    "release:validate": "npm run test:all && npm run verify:package && npm run release:runtime && npm run smoke:runtime",
     "dev": "vite --host 127.0.0.1",
     "serve:local": "node scripts/serve-local.mjs"
   },
@@ -40,6 +57,7 @@
     "lit": "^3.2.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "jsdom": "^25.0.1",
     "playwright": "^1.61.1",
     "typescript": "^5.8.3",

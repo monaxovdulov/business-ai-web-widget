@@ -1,4 +1,4 @@
-import { createPublicSessionId } from "../domain/ids";
+import { normalizePublicSessionId } from "../domain/public-session";
 import type { SiteWidgetPanelSize, SiteWidgetStorageMode } from "../types/public";
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -24,15 +24,21 @@ export function createSessionStore(widgetInstanceId: string, mode: SiteWidgetSto
 
   return {
     getPublicSessionId() {
-      const existing = storageGet(storage, publicSessionKey) || memoryPublicSessionId;
-      if (existing) return existing;
-      const created = createPublicSessionId();
-      memoryPublicSessionId = created;
-      storageSet(storage, publicSessionKey, created);
-      return created;
+      const stored = storageGet(storage, publicSessionKey);
+      const normalized = normalizePublicSessionId(stored || memoryPublicSessionId);
+
+      if (!normalized) {
+        memoryPublicSessionId = "";
+        if (stored) storageRemove(storage, publicSessionKey);
+        return "";
+      }
+
+      memoryPublicSessionId = normalized;
+      if (stored && stored !== normalized) storageSet(storage, publicSessionKey, normalized);
+      return normalized;
     },
     setPublicSessionId(publicSessionId: string) {
-      const normalized = publicSessionId.trim();
+      const normalized = normalizePublicSessionId(publicSessionId);
       if (!normalized) return;
       memoryPublicSessionId = normalized;
       storageSet(storage, publicSessionKey, normalized);

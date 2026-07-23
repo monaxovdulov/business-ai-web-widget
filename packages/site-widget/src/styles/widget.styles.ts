@@ -2,7 +2,7 @@ import { css } from "lit";
 
 export const widgetStyles = css`
   :host {
-    --sw-color-accent: #a98b6d;
+    --sw-color-accent: #8a6f55;
     --sw-color-accent-text: #ffffff;
     --sw-color-surface-panel: #fffdf9;
     --sw-color-surface-message-assistant: #ffffff;
@@ -12,7 +12,7 @@ export const widgetStyles = css`
     --sw-color-border-soft: rgba(55, 48, 40, 0.1);
     --sw-color-text-primary: #2f2d2a;
     --sw-color-text-secondary: #716d67;
-    --sw-color-text-muted: #9b948c;
+    --sw-color-text-muted: #766f68;
     --sw-color-online: #68c75a;
     --sw-color-error: #b84b3f;
     --sw-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -34,6 +34,8 @@ export const widgetStyles = css`
     --sw-motion-fast: 120ms;
     --sw-motion-panel: 180ms;
     --sw-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+    --sw-panel-normal-width: 520px;
+    --sw-panel-wide-width: 640px;
 
     bottom: max(24px, env(safe-area-inset-bottom));
     color: var(--sw-color-text-primary);
@@ -68,7 +70,7 @@ export const widgetStyles = css`
   }
 
   :host([theme="light-catalog"]) {
-    --sw-color-accent: #7c8a6a;
+    --sw-color-accent: #647252;
     --sw-color-surface-panel: #fbfbf7;
     --sw-color-surface-message-visitor: #e9eee2;
     --sw-color-text-primary: #252821;
@@ -162,25 +164,34 @@ export const widgetStyles = css`
     box-shadow: var(--sw-shadow-panel);
     display: flex;
     flex-direction: column;
+    height: min(680px, calc(100dvh - 48px));
     max-height: min(760px, calc(100vh - 48px));
     overflow: hidden;
-    width: min(640px, calc(100vw - 48px));
+    width: min(var(--sw-panel-normal-width), calc(100vw - 48px));
   }
 
   .header {
     align-items: center;
     border-bottom: 1px solid var(--sw-color-border-soft);
     display: grid;
-    gap: 14px;
-    grid-template-columns: 52px minmax(0, 1fr) auto;
-    min-height: 108px;
-    padding: 24px 26px 22px;
+    gap: 12px;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    min-height: 94px;
+    padding: 18px 20px;
+  }
+
+  .header > div:nth-child(2) {
+    min-width: 0;
   }
 
   .header-actions {
     align-items: center;
     display: flex;
     gap: 8px;
+  }
+
+  .header-actions [part~="minimize-button"] {
+    display: none;
   }
 
   .brand-mark {
@@ -191,9 +202,9 @@ export const widgetStyles = css`
     box-shadow: 0 8px 24px rgba(35, 29, 22, 0.08);
     color: var(--sw-color-accent);
     display: inline-flex;
-    height: 52px;
+    height: 48px;
     justify-content: center;
-    width: 52px;
+    width: 48px;
   }
 
   .title {
@@ -202,6 +213,7 @@ export const widgetStyles = css`
     letter-spacing: 0;
     line-height: 1.12;
     margin: 0 0 6px;
+    overflow-wrap: anywhere;
   }
 
   .status {
@@ -229,6 +241,8 @@ export const widgetStyles = css`
   .contact-trigger,
   .phone-save,
   .retry-button,
+  .attachment__remove,
+  .jump-latest,
   .mobile-action {
     -webkit-tap-highlight-color: transparent;
   }
@@ -265,17 +279,20 @@ export const widgetStyles = css`
   .panel[data-size="wide"] {
     --sw-message-max-width: 560px;
 
-    width: min(860px, calc(100vw - 48px));
+    width: min(var(--sw-panel-wide-width), calc(100vw - 48px));
   }
 
   .panel[data-size="fullscreen"] {
     --sw-message-max-width: 680px;
 
     border-radius: 18px;
-    height: calc(100dvh - 48px);
-    inset: 24px;
+    bottom: max(24px, env(safe-area-inset-bottom));
+    height: auto;
+    left: max(24px, env(safe-area-inset-left));
     max-height: none;
     position: fixed;
+    right: max(24px, env(safe-area-inset-right));
+    top: max(24px, env(safe-area-inset-top));
     width: auto;
   }
 
@@ -283,27 +300,84 @@ export const widgetStyles = css`
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 16px;
-    min-height: 300px;
+    gap: 12px;
+    min-height: 0;
     overflow: hidden;
-    padding: 24px 26px 18px;
+    padding: 18px 20px 14px;
+  }
+
+  .message-scroller {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    position: relative;
+  }
+
+  .message-viewport {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+    outline: 0;
+    overflow-anchor: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
   }
 
   .messages {
     display: flex;
-    flex: 1;
     flex-direction: column;
-    gap: 14px;
-    min-height: 220px;
-    overflow-y: auto;
-    padding-right: 4px;
-    scroll-behavior: smooth;
+    gap: 11px;
+    min-height: 100%;
+  }
+
+  .message-scroller__item {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .message-scroller__tail {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+
+  .jump-latest {
+    align-items: center;
+    background: var(--sw-color-surface-control);
+    border: 1px solid var(--sw-color-border-soft);
+    border-radius: var(--sw-radius-button);
+    bottom: 8px;
+    box-shadow: 0 8px 24px rgba(35, 29, 22, 0.12);
+    color: var(--sw-color-text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: var(--sw-font-size-small);
+    font-weight: var(--sw-font-weight-action);
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 16px;
+    position: absolute;
+    right: 12px;
+    z-index: 1;
   }
 
   .quick-replies {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 8px;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 0 14px 3px 0;
+    scrollbar-width: thin;
+  }
+
+  .quick-replies::after {
+    content: "";
+    flex: 0 0 10px;
   }
 
   .quick-reply {
@@ -325,7 +399,8 @@ export const widgetStyles = css`
 
   .composer-shell {
     border-top: 1px solid var(--sw-color-border-soft);
-    padding: 18px 26px 22px;
+    flex: 0 0 auto;
+    padding: 14px 20px 18px;
   }
 
   .composer {
@@ -335,9 +410,18 @@ export const widgetStyles = css`
     border-radius: var(--sw-radius-input);
     display: grid;
     gap: 10px;
-    grid-template-columns: 40px minmax(0, 1fr) 46px;
+    grid-template-columns: minmax(0, 1fr) 46px;
     min-height: 58px;
-    padding: 7px 8px 7px 12px;
+    padding: 7px 8px 7px 10px;
+  }
+
+  .composer:focus-within {
+    border-color: var(--sw-color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sw-color-accent) 24%, transparent);
+  }
+
+  .composer[data-attachments="true"] {
+    grid-template-columns: 44px minmax(0, 1fr) 46px;
   }
 
   .attach-button {
@@ -345,8 +429,8 @@ export const widgetStyles = css`
     border: 0;
     color: var(--sw-color-accent);
     cursor: pointer;
-    height: 40px;
-    width: 40px;
+    height: 44px;
+    width: 44px;
   }
 
   .attach-button:disabled {
@@ -354,11 +438,81 @@ export const widgetStyles = css`
     opacity: 0.48;
   }
 
+  .attachment-validation {
+    color: var(--sw-color-error);
+    font-size: var(--sw-font-size-small);
+    line-height: var(--sw-line-height-small);
+    margin: 0 0 8px;
+  }
+
+  .attachment-list {
+    display: flex;
+    gap: 8px;
+    list-style: none;
+    margin: 0 0 10px;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 0 0 2px;
+  }
+
+  .attachment {
+    align-items: center;
+    background: var(--sw-color-surface-control);
+    border: 1px solid var(--sw-color-border-soft);
+    border-radius: 12px;
+    display: grid;
+    flex: 0 0 auto;
+    gap: 6px;
+    grid-template-columns: 44px minmax(42px, 1fr) 44px;
+    min-width: 152px;
+    overflow: hidden;
+    padding: 4px;
+  }
+
+  .attachment__preview {
+    background: var(--sw-color-surface-system);
+    border-radius: 8px;
+    display: block;
+    height: 44px;
+    object-fit: cover;
+    width: 44px;
+  }
+
+  .attachment__details {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .attachment__label {
+    font-size: var(--sw-font-size-small);
+    font-weight: var(--sw-font-weight-action);
+  }
+
+  .attachment__size {
+    color: var(--sw-color-text-secondary);
+    font-size: 12px;
+  }
+
+  .attachment__remove {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    color: var(--sw-color-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    height: 44px;
+    justify-content: center;
+    padding: 0;
+    width: 44px;
+  }
+
   .textarea {
     background: transparent;
     border: 0;
     color: var(--sw-color-text-primary);
-    min-height: 40px;
+    min-height: 44px;
     max-height: 118px;
     outline: 0;
     overflow-y: auto;
@@ -489,20 +643,30 @@ export const widgetStyles = css`
   .contact-trigger:focus-visible,
   .phone-field:focus-visible,
   .phone-save:focus-visible,
-  .retry-button:focus-visible {
-    outline: 3px solid color-mix(in srgb, var(--sw-color-accent) 35%, transparent);
+  .retry-button:focus-visible,
+  .attachment__remove:focus-visible,
+  .jump-latest:focus-visible {
+    box-shadow: 0 0 0 2px var(--sw-color-surface-panel);
+    outline: 3px solid var(--sw-color-accent);
     outline-offset: 3px;
+  }
+
+  .message-viewport:focus-visible {
+    border-radius: 10px;
+    outline: 3px solid var(--sw-color-accent);
+    outline-offset: 2px;
   }
 
   @media (max-width: 767px) {
     :host {
       bottom: max(12px, env(safe-area-inset-bottom));
-      left: 12px;
-      right: 12px;
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
     }
 
     .panel {
       border-radius: 22px;
+      height: calc(100dvh - 24px);
       max-height: calc(100dvh - 24px);
       width: auto;
     }
@@ -519,9 +683,9 @@ export const widgetStyles = css`
 
     .header {
       gap: 10px;
-      grid-template-columns: 46px minmax(0, 1fr) auto;
+      grid-template-columns: 44px minmax(0, 1fr) auto;
       min-height: 92px;
-      padding: 18px;
+      padding: 16px;
     }
 
     .header-actions {
@@ -529,8 +693,8 @@ export const widgetStyles = css`
     }
 
     .brand-mark {
-      height: 46px;
-      width: 46px;
+      height: 44px;
+      width: 44px;
     }
 
     .title {
@@ -538,8 +702,8 @@ export const widgetStyles = css`
     }
 
     .icon-button {
-      height: 40px;
-      width: 40px;
+      height: 44px;
+      width: 44px;
     }
 
     .panel[data-size="wide"] {
@@ -557,11 +721,11 @@ export const widgetStyles = css`
     }
 
     .body {
-      padding: 18px 18px 14px;
+      padding: 14px 16px 12px;
     }
 
     .composer-shell {
-      padding: 14px 18px 18px;
+      padding: 12px 16px 14px;
     }
 
     .quick-replies {
@@ -577,6 +741,16 @@ export const widgetStyles = css`
 
     .message__text {
       font-size: 15px;
+    }
+
+    .textarea,
+    .phone-field {
+      font-size: 16px;
+    }
+
+    .footer-note {
+      margin-top: 10px;
+      padding-top: 10px;
     }
   }
 
@@ -604,12 +778,42 @@ export const widgetStyles = css`
       gap: 4px;
     }
 
-    .icon-button {
-      height: 38px;
-      width: 38px;
+  }
+
+  @media (max-height: 500px) and (orientation: landscape) {
+    .header {
+      grid-template-columns: 40px minmax(0, 1fr) auto;
+      min-height: 76px;
+      padding: 10px 16px;
     }
 
-    .header-actions [part="minimize-button"] {
+    .brand-mark {
+      height: 40px;
+      width: 40px;
+    }
+
+    .title {
+      font-size: 18px;
+      margin-bottom: 3px;
+    }
+
+    .status {
+      font-size: 12px;
+      gap: 5px;
+    }
+
+    .body {
+      gap: 6px;
+      padding: 8px 16px;
+    }
+
+    .composer-shell {
+      padding: 8px 16px 10px;
+    }
+
+    .contact-row,
+    .phone-capture,
+    .footer-note {
       display: none;
     }
   }
