@@ -10,7 +10,10 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private sessionStore?;
     private publicSessionId;
     private abortController;
+    private historyAbortController;
+    private historyEpoch;
     private operationEpoch;
+    private dateRolloverTimer;
     private readonly messageScroller;
     private readonly imageAttachments;
     private sendMessageRequest;
@@ -28,7 +31,10 @@ export declare class GranitSiteWidgetElement extends LitElement {
     protected updated(): void;
     private boot;
     private syncHostAttributes;
+    private createConfiguredSessionStore;
     private persistOpenState;
+    private scheduleDateRollover;
+    private clearDateRolloverTimer;
     private cyclePanelSize;
     private getPanelSizeButtonLabel;
     private getNextPanelSize;
@@ -52,6 +58,8 @@ export declare class GranitSiteWidgetElement extends LitElement {
     private retryPending;
     private sendPending;
     private invalidateActiveWork;
+    private startHistoryPolling;
+    private pollHistory;
     private buildContact;
     private isPhotoPreviewEnabled;
     private handleAttachmentFiles;

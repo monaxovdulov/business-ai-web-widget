@@ -28,7 +28,7 @@ export function buildSiteWidgetMessageRequest(input: BuildSiteWidgetRequestInput
   });
 
   return withoutEmpty({
-    schema_version: "site_widget.v1" as const,
+    schema_version: "site_widget.v2" as const,
     event_type: "site_widget.message_submitted" as const,
     idempotency_key: input.idempotencyKey,
     submitted_at: input.environment.now,

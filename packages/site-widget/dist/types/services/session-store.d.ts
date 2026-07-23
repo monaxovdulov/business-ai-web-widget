@@ -8,5 +8,9 @@ export type WidgetSessionStore = {
     getPanelSize(): SiteWidgetPanelSize | undefined;
     setPanelSize(panelSize: SiteWidgetPanelSize): void;
 };
-export declare function createSessionStore(widgetInstanceId: string, mode?: SiteWidgetStorageMode): WidgetSessionStore;
+export type WidgetSessionStoreOptions = {
+    conversationScopeId?: string | undefined;
+    legacyConversationScopeIds?: readonly string[] | undefined;
+};
+export declare function createSessionStore(widgetInstanceId: string, mode?: SiteWidgetStorageMode, options?: WidgetSessionStoreOptions): WidgetSessionStore;
 //# sourceMappingURL=session-store.d.ts.map

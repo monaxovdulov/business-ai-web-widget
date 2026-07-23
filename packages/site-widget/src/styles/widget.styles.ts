@@ -651,6 +651,12 @@ export const widgetStyles = css`
     outline-offset: 3px;
   }
 
+  .message-link:focus-visible {
+    border-radius: 11px;
+    outline: 3px solid var(--sw-color-accent);
+    outline-offset: 3px;
+  }
+
   .message-viewport:focus-visible {
     border-radius: 10px;
     outline: 3px solid var(--sw-color-accent);

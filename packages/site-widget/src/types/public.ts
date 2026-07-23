@@ -39,7 +39,7 @@ export type SiteWidgetUtm = {
 };
 
 export type SiteWidgetMessageRequest = {
-  schema_version: "site_widget.v1";
+  schema_version: "site_widget.v2";
   event_type: "site_widget.message_submitted";
   idempotency_key: string;
   submitted_at: string;
@@ -66,7 +66,7 @@ export type SiteWidgetMessageRequest = {
   } | undefined;
 };
 
-export type WidgetAutomationStatus = "replied" | "fallback" | "disabled";
+export type WidgetAutomationStatus = "processing" | "replied" | "fallback" | "disabled";
 
 export type SiteWidgetAcceptanceStatus = "accepted" | "replayed";
 
@@ -75,7 +75,9 @@ type SiteWidgetServerResponseBase = {
   acceptanceStatus: SiteWidgetAcceptanceStatus;
   action: "show_widget_saved";
   publicSessionId: string;
+  publicConversationId?: string | undefined;
   publicMessageId: string;
+  submittedAt?: string | undefined;
   raw: unknown;
 };
 
@@ -85,6 +87,10 @@ export type SiteWidgetServerResponseViewModel =
       replyText: string;
       replyPublicMessageId: string;
       disclosureText: string;
+    })
+  | (SiteWidgetServerResponseBase & {
+      status: "processing";
+      pollAfterMs: number;
     })
   | (SiteWidgetServerResponseBase & {
       status: "fallback";
@@ -98,7 +104,7 @@ export type SiteWidgetServerResponseViewModel =
 
 export type SiteWidgetMockResponseViewModel = {
   source: "mock";
-  status: WidgetAutomationStatus;
+  status: Exclude<WidgetAutomationStatus, "processing">;
   publicSessionId?: string | undefined;
   replyText?: string | undefined;
   systemText?: string | undefined;
@@ -114,6 +120,14 @@ export type WidgetMessageStatus = "pending" | "saved" | "sent" | "error";
 
 export type WidgetSystemKind = "fallback" | "disabled";
 
+export type WidgetCatalogReference = {
+  kind: "catalog_item";
+  label: string;
+  title: string;
+  href: string;
+  entityId: string;
+};
+
 export type WidgetMessage = {
   id: string;
   role: WidgetMessageRole;
@@ -125,6 +139,30 @@ export type WidgetMessage = {
   disclosure?: boolean | undefined;
   disclosureText?: string | undefined;
   systemKind?: WidgetSystemKind | undefined;
+  catalogReferences?: WidgetCatalogReference[] | undefined;
+  localKind?: "intro" | undefined;
+};
+
+export type SiteWidgetHistoryMessage = {
+  publicMessageId: string;
+  senderRole: "visitor" | "ai_assistant" | "manager";
+  text: string;
+  submittedAt: string;
+  deliveryState: "accepted";
+  catalogReferences: WidgetCatalogReference[];
+  automation?: {
+    status: "pending" | "processing" | "retrying" | "replied" | "degraded" | "blocked" | "failed";
+    reason?: string | undefined;
+  } | undefined;
+};
+
+export type SiteWidgetHistoryViewModel = {
+  publicSessionId: string;
+  publicConversationId: string;
+  conversationState: "ai_active" | "manager_pending" | "manager_active" | "closed";
+  pollAfterMs?: number | undefined;
+  messages: SiteWidgetHistoryMessage[];
+  raw: unknown;
 };
 
 export type SiteWidgetEventName =
@@ -143,6 +181,8 @@ export type SiteWidgetConfig = {
   messagesPath: "/public/intake/site-widget/messages" | string;
   timeoutMs: number;
   widgetInstanceId: string;
+  conversationScopeId: string;
+  legacyConversationScopeIds: string[];
   theme: SiteWidgetTheme;
   position: SiteWidgetPosition;
   panelSize: SiteWidgetPanelSize;

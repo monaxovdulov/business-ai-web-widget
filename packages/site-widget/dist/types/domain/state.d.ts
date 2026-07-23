@@ -1,4 +1,4 @@
-import type { SiteWidgetAcceptanceStatus, SiteWidgetConfig, WidgetMessage, WidgetMessageStatus, WidgetSystemKind } from "../types/public";
+import type { SiteWidgetAcceptanceStatus, SiteWidgetConfig, SiteWidgetHistoryMessage, WidgetCatalogReference, WidgetMessage, WidgetMessageStatus, WidgetSystemKind } from "../types/public";
 export type WidgetStatus = "closed" | "open_idle" | "composing" | "submitting" | "submitted_waiting" | "replied" | "fallback" | "disabled" | "error";
 export type PendingSubmission = {
     messageId: string;
@@ -13,6 +13,8 @@ export type WidgetState = {
     contactCaptureOpen: boolean;
     submitting: boolean;
     pending?: PendingSubmission | undefined;
+    awaitingAi: boolean;
+    conversationState?: "ai_active" | "manager_pending" | "manager_active" | "closed" | undefined;
     messages: WidgetMessage[];
     visitorMessageCount: number;
     unreadCount: number;
@@ -41,6 +43,8 @@ export type WidgetAction = {
     messageId: string;
     publicMessageId: string;
     acceptanceStatus: SiteWidgetAcceptanceStatus;
+    submittedAt?: string | undefined;
+    awaitingAi?: boolean | undefined;
 } | {
     type: "visitor.mocked";
     messageId: string;
@@ -49,6 +53,13 @@ export type WidgetAction = {
     text: string;
     publicMessageId?: string | undefined;
     disclosureText?: string | undefined;
+    catalogReferences?: WidgetCatalogReference[] | undefined;
+    createdAt?: string | undefined;
+} | {
+    type: "history.synced";
+    messages: SiteWidgetHistoryMessage[];
+    awaitingAi: boolean;
+    conversationState: "ai_active" | "manager_pending" | "manager_active" | "closed";
 } | {
     type: "system.message";
     text: string;
@@ -67,7 +78,7 @@ export declare function createWidgetState({ config, open, now }: {
 }): WidgetState;
 export declare function applyWidgetAction(state: WidgetState, action: WidgetAction, config?: SiteWidgetConfig): WidgetState;
 export declare function validateDraft(text: string, config: SiteWidgetConfig): "empty_message" | "message_too_long" | null;
-export declare function createWidgetMessage({ role, text, status, disclosure, publicMessageId, acceptanceStatus, disclosureText, systemKind, createdAt }: {
+export declare function createWidgetMessage({ role, text, status, disclosure, publicMessageId, acceptanceStatus, disclosureText, systemKind, catalogReferences, localKind, id, createdAt }: {
     role: WidgetMessage["role"];
     text: string;
     status?: WidgetMessageStatus;
@@ -76,6 +87,9 @@ export declare function createWidgetMessage({ role, text, status, disclosure, pu
     acceptanceStatus?: SiteWidgetAcceptanceStatus;
     disclosureText?: string | undefined;
     systemKind?: WidgetSystemKind;
-    createdAt?: string;
+    catalogReferences?: WidgetCatalogReference[] | undefined;
+    localKind?: "intro" | undefined;
+    id?: string | undefined;
+    createdAt?: string | undefined;
 }): WidgetMessage;
 //# sourceMappingURL=state.d.ts.map

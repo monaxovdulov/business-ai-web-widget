@@ -15,6 +15,8 @@ export declare function readConfigFromElement(element: Element): SiteWidgetConfi
 export declare function applyOptionsToElement(element: HTMLElement, options?: MountSiteWidgetOptions): void;
 export declare function parseQuickReplies(value: string): SiteWidgetQuickReply[];
 export declare function parseActions(value: string): SiteWidgetAction[];
+export declare function parseConversationScopeIds(value: string): string[];
+export declare function normalizeConversationScopeIds(value: unknown, canonicalScopeId: string): string[];
 export declare function normalizeQuickReplies(value?: readonly SiteWidgetQuickReply[]): SiteWidgetQuickReply[];
 export declare function normalizeActions(value?: readonly SiteWidgetAction[], phoneHref?: string): SiteWidgetAction[];
 export declare function normalizePanelSize(value: unknown): SiteWidgetPanelSize;

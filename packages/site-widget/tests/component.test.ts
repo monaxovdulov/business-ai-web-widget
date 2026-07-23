@@ -6,7 +6,9 @@ import {
   fallbackReceipt,
   repliedReceipt,
   TEST_REPLY_MESSAGE_ID,
-  TEST_VISITOR_MESSAGE_ID
+  TEST_VISITOR_MESSAGE_ID,
+  v2History,
+  v2ProcessingReceipt
 } from "./helpers/response-fixtures";
 
 const BACKEND_SESSION_ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -105,13 +107,143 @@ describe("granit-site-widget Lit component", () => {
     widget.sendMessage("Проверка статуса");
     await vi.waitFor(() => {
       expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("true");
-      expect(widget.shadowRoot?.querySelector('[aria-atomic="true"]')?.textContent).toContain("Отправляем сообщение");
+      expect(widget.shadowRoot?.querySelector('[aria-atomic="true"]')?.textContent).toContain(
+        "Сообщение отправлено из браузера"
+      );
+      expect(widget.shadowRoot?.querySelector('.message-status')?.textContent).toContain("Отправлено");
+      expect(widget.shadowRoot?.querySelector('.message-status__checks')?.textContent).toBe("✓");
+      expect(widget.shadowRoot?.querySelector('.message-status__spinner')).toBeNull();
     });
 
     resolveRequest({ source: "mock", status: "replied", replyText: "Готово", raw: {} });
     await vi.waitFor(() => {
       expect(widget.shadowRoot?.querySelector('.messages')?.getAttribute("aria-busy")).toBe("false");
     });
+  });
+
+  it("shows accepted then typing, restores the AI reply, and renders a safe catalog link with time", async () => {
+    const requests: Array<{
+      method: string;
+      url: string;
+      body?: Record<string, unknown> | undefined;
+    }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const method = init?.method ?? "GET";
+      const url = String(input);
+      requests.push({
+        method,
+        url,
+        body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
+      });
+
+      if (method === "POST") {
+        return new Response(
+          JSON.stringify(
+            v2ProcessingReceipt({
+              publicSessionId: BACKEND_SESSION_ID,
+              pollAfterMs: 250
+            })
+          ),
+          { status: 202, headers: { "content-type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify(v2History({ publicSessionId: BACKEND_SESSION_ID })),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId: "v2-async-ui"
+    });
+    await widget.updateComplete;
+
+    widget.sendMessage("Покажите модель Арфа");
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('.message-root--visitor')?.getAttribute("data-message-status")).toBe(
+        "saved"
+      );
+      expect(widget.shadowRoot?.querySelector('[part~="typing-indicator"]')).toBeTruthy();
+    });
+
+    expect(widget.shadowRoot?.textContent).toContain("Принято");
+    expect(widget.shadowRoot?.querySelector('.message-status__checks')?.textContent).toBe("✓✓");
+    expect(widget.shadowRoot?.querySelector<HTMLTextAreaElement>(".textarea")?.disabled).toBe(false);
+    expect(requests[0]?.body?.schema_version).toBe("site_widget.v2");
+
+    await vi.waitFor(
+      () => {
+        expect(widget.shadowRoot?.querySelector('[part~="typing-indicator"]')).toBeNull();
+        expect(widget.shadowRoot?.querySelectorAll('[part~="message-link"]')).toHaveLength(1);
+      },
+      { timeout: 2_000 }
+    );
+
+    const link = widget.shadowRoot?.querySelector<HTMLAnchorElement>('[part~="message-link"]');
+    expect(link?.getAttribute("href")).toBe(
+      "/catalog.html?section=pamyatniki&entity=ent_1395cd250bbce644514c7e44#block-vertical-monuments"
+    );
+    expect(link?.getAttribute("target")).toBe("_self");
+    expect(link?.textContent).toContain("Посмотреть «Арфа»");
+    expect(widget.shadowRoot?.querySelectorAll('[part~="message-disclosure"]')).toHaveLength(1);
+    const times = [...(widget.shadowRoot?.querySelectorAll<HTMLTimeElement>(".message-time") ?? [])];
+    expect(times).toHaveLength(2);
+    expect(times.every((time) => Boolean(time.getAttribute("aria-label")?.match(/2026/u)))).toBe(true);
+    expect(times.map((time) => time.getAttribute("datetime"))).toEqual([
+      "2026-07-22T19:00:00.000Z",
+      "2026-07-22T19:00:02.000Z"
+    ]);
+    expect(widget.shadowRoot?.textContent).not.toContain("/catalog.html?");
+    expect(requests.some((request) => request.url.includes("site_widget.history.v2"))).toBe(true);
+  });
+
+  it("restores an explicit manager marker from manager-active history without stuck typing", async () => {
+    const widgetInstanceId = "manager-active-history";
+    localStorage.setItem(`sw:${widgetInstanceId}:public_session_id`, BACKEND_SESSION_ID);
+    const history = {
+      ...v2History({
+        publicSessionId: BACKEND_SESSION_ID,
+        messages: [
+          {
+            public_message_id: TEST_VISITOR_MESSAGE_ID,
+            sender_role: "visitor",
+            text: "Ещё вопрос после подключения менеджера",
+            submitted_at: "2026-07-22T20:23:01.374Z",
+            delivery_state: "accepted"
+          }
+        ]
+      }),
+      conversation_state: "manager_active"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(history), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const widget = mountSiteWidget({
+      mock: false,
+      open: true,
+      apiBaseUrl: "https://ops.example.com",
+      widgetInstanceId
+    });
+
+    await vi.waitFor(() => {
+      expect(widget.shadowRoot?.querySelector('[part~="marker"]')?.textContent).toContain(
+        "Менеджер проверит детали"
+      );
+    });
+
+    expect(widget.shadowRoot?.querySelector('[part~="typing-indicator"]')).toBeNull();
+    expect(widget.shadowRoot?.querySelector('.message-status__spinner')).toBeNull();
+    expect(widget.shadowRoot?.querySelectorAll('[part~="marker"]')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("site_widget.history.v2"),
+      expect.objectContaining({ method: "GET" })
+    );
   });
 
   it("handles Escape once and restores focus to the launcher", async () => {
@@ -1108,6 +1240,29 @@ describe("granit-site-widget Lit component", () => {
     expect(localStorage.getItem("sw:boundary-b:public_session_id")).toBeNull();
     expect(transcriptTexts()).not.toContain("Старый ответ экземпляра A");
     expect(transcriptTexts()).not.toContain("Запрос экземпляра A");
+  });
+
+  it("establishes a fresh runtime boundary when conversation scope changes", async () => {
+    const widget = mountSiteWidget({
+      mock: true,
+      open: true,
+      widgetInstanceId: "shared-mount",
+      conversationScopeId: "conversation-a",
+      legacyConversationScopeIds: ["legacy-a"]
+    });
+    await widget.updateComplete;
+
+    widget.sendMessage("Сообщение прежнего conversation scope");
+    await vi.waitFor(() =>
+      expect(widget.shadowRoot?.textContent).toContain("Сообщение прежнего conversation scope")
+    );
+
+    widget.setAttribute("conversation-scope-id", "conversation-b");
+    widget.setAttribute("legacy-conversation-scope-ids", "legacy-b,legacy-c");
+    await widget.updateComplete;
+
+    expect(widget.shadowRoot?.textContent).not.toContain("Сообщение прежнего conversation scope");
+    expect(widget.getAttribute("widget-instance-id")).toBe("shared-mount");
   });
 
   it("does not start a request after synchronous disconnect and restores a retryable state on reattach", async () => {

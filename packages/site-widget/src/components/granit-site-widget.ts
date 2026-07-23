@@ -15,14 +15,19 @@ import {
 import { buildWidgetViewModel } from "../domain/view-model";
 import { emitSiteWidgetEvent } from "../events/widget-events";
 import { readBrowserEnvironment } from "../services/browser-env";
-import { sendSiteWidgetMessage } from "../services/intake-client";
+import { fetchSiteWidgetHistory, sendSiteWidgetMessage } from "../services/intake-client";
 import { createSessionStore, type WidgetSessionStore } from "../services/session-store";
 import { messageStyles } from "../styles/message.styles";
 import { widgetStyles } from "../styles/widget.styles";
 import type { SiteWidgetAction, SiteWidgetConfig, SiteWidgetContact, SiteWidgetPanelSize } from "../types/public";
 import { widgetIcon } from "../ui/icons";
 import { renderAttachmentPicker, renderAttachmentPreviewList } from "./widget-attachments";
-import { renderChatItem } from "./widget-message";
+import {
+  millisecondsUntilNextLocalDay,
+  renderChatItem,
+  renderDateSeparator,
+  renderTypingIndicator
+} from "./widget-message";
 
 export const SITE_WIDGET_TAG_NAME = "granit-site-widget";
 
@@ -48,7 +53,10 @@ export class GranitSiteWidgetElement extends LitElement {
   private sessionStore?: WidgetSessionStore;
   private publicSessionId = "";
   private abortController: AbortController | undefined;
+  private historyAbortController: AbortController | undefined;
+  private historyEpoch = 0;
   private operationEpoch = 0;
+  private dateRolloverTimer: number | undefined;
   private readonly messageScroller = new MessageScrollerController(this);
   private readonly imageAttachments = new ImageAttachmentController(this);
   private sendMessageRequest = sendSiteWidgetMessage;
@@ -60,11 +68,13 @@ export class GranitSiteWidgetElement extends LitElement {
     const reconnecting = this.hasBooted;
     super.connectedCallback();
     this.boot();
+    this.scheduleDateRollover();
     if (reconnecting) this.requestUpdate();
   }
 
   override disconnectedCallback(): void {
     this.invalidateActiveWork(true);
+    this.clearDateRolloverTimer();
     super.disconnectedCallback();
   }
 
@@ -77,7 +87,10 @@ export class GranitSiteWidgetElement extends LitElement {
     this.syncHostAttributes();
     const photoPreviewEnabled = this.isPhotoPreviewEnabled();
     const sessionBoundaryChanged =
-      previousConfig.widgetInstanceId !== this.config.widgetInstanceId || previousConfig.storage !== this.config.storage;
+      previousConfig.widgetInstanceId !== this.config.widgetInstanceId ||
+      previousConfig.conversationScopeId !== this.config.conversationScopeId ||
+      !sameStringArrays(previousConfig.legacyConversationScopeIds, this.config.legacyConversationScopeIds) ||
+      previousConfig.storage !== this.config.storage;
     const transportBoundaryChanged =
       previousConfig.apiBaseUrl !== this.config.apiBaseUrl ||
       previousConfig.messagesPath !== this.config.messagesPath ||
@@ -89,7 +102,7 @@ export class GranitSiteWidgetElement extends LitElement {
       const wasOpen = this.state.open;
       this.invalidateActiveWork(false);
       this.imageAttachments.clearAll();
-      this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
+      this.sessionStore = this.createConfiguredSessionStore();
       this.publicSessionId = this.sessionStore.getPublicSessionId();
       this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
       this.state = createWidgetState({ config: this.config, open: wasOpen });
@@ -159,8 +172,10 @@ export class GranitSiteWidgetElement extends LitElement {
       pendingMessage?.status === "error"
         ? this.config.errorMessage
         : pendingMessage?.status === "pending"
-          ? "Отправляем сообщение."
-          : "";
+          ? "Сообщение отправлено из браузера."
+          : view.awaitingAi
+            ? "Сообщение принято. AI-помощник печатает."
+            : "";
 
     return html`
       <button
@@ -253,23 +268,27 @@ export class GranitSiteWidgetElement extends LitElement {
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions"
-                aria-busy=${String(view.submitting)}
+                aria-busy=${String(view.submitting || view.awaitingAi)}
               >
                 ${repeat(
                   view.messages,
                   (message) => message.id,
-                  (message) => html`<div
-                    class="message-scroller__item"
-                    data-message-id=${message.id}
-                    data-scroll-anchor=${message.role === "visitor" ? "true" : nothing}
-                  >
-                    ${renderChatItem(message, {
-                      config: this.config,
-                      onRetry: this.retryPending,
-                      images: this.imageAttachments.getForMessage(message.id)
-                    })}
-                  </div>`
+                  (message, index) => html`
+                    ${renderDateSeparator(message, index > 0 ? view.messages[index - 1] : undefined)}
+                    <div
+                      class="message-scroller__item"
+                      data-message-id=${message.id}
+                      data-scroll-anchor=${message.role === "visitor" ? "true" : nothing}
+                    >
+                      ${renderChatItem(message, {
+                        config: this.config,
+                        onRetry: this.retryPending,
+                        images: this.imageAttachments.getForMessage(message.id)
+                      })}
+                    </div>
+                  `
                 )}
+                ${view.awaitingAi ? renderTypingIndicator() : nothing}
                 <div class="message-scroller__tail" aria-hidden="true"></div>
               </div>
             </div>
@@ -413,7 +432,7 @@ export class GranitSiteWidgetElement extends LitElement {
     if (this.hasBooted) return;
     this.config = readConfigFromElement(this);
     this.syncHostAttributes();
-    this.sessionStore = createSessionStore(this.config.widgetInstanceId, this.config.storage);
+    this.sessionStore = this.createConfiguredSessionStore();
     this.publicSessionId = this.sessionStore.getPublicSessionId();
     this.panelSize = this.sessionStore.getPanelSize() ?? this.config.panelSize;
     this.imageAttachments.setEnabled(this.isPhotoPreviewEnabled());
@@ -424,6 +443,7 @@ export class GranitSiteWidgetElement extends LitElement {
     if (initialOpen && !this.hasAttribute("open")) this.setAttribute("open", "");
 
     this.hasBooted = true;
+    if (this.publicSessionId && !this.config.mock) this.startHistoryPolling(0);
     void this.updateComplete.then(() => {
       emitSiteWidgetEvent(this, "ready", this.config);
       if (initialOpen) void this.focusInputSoon();
@@ -435,8 +455,31 @@ export class GranitSiteWidgetElement extends LitElement {
     if (this.getAttribute("position") !== this.config.position) this.setAttribute("position", this.config.position);
   }
 
+  private createConfiguredSessionStore(): WidgetSessionStore {
+    return createSessionStore(this.config.widgetInstanceId, this.config.storage, {
+      conversationScopeId: this.config.conversationScopeId,
+      legacyConversationScopeIds: this.config.legacyConversationScopeIds
+    });
+  }
+
   private persistOpenState(open: boolean): void {
     if (this.config.persistOpenState) this.sessionStore?.setOpenState(open);
+  }
+
+  private scheduleDateRollover(): void {
+    this.clearDateRolloverTimer();
+    this.dateRolloverTimer = globalThis.setTimeout(() => {
+      this.dateRolloverTimer = undefined;
+      if (!this.isConnected) return;
+      this.requestUpdate();
+      this.scheduleDateRollover();
+    }, millisecondsUntilNextLocalDay());
+  }
+
+  private clearDateRolloverTimer(): void {
+    if (this.dateRolloverTimer === undefined) return;
+    globalThis.clearTimeout(this.dateRolloverTimer);
+    this.dateRolloverTimer = undefined;
   }
 
   private cyclePanelSize = (): void => {
@@ -651,7 +694,7 @@ export class GranitSiteWidgetElement extends LitElement {
 
       if (response.source === "server") {
         if (this.publicSessionId && response.publicSessionId !== this.publicSessionId) {
-          throw new Error("Invalid site_widget.v1 response: public_session_id_mismatch");
+          throw new Error("Invalid site_widget.v2 response: public_session_id_mismatch");
         }
         this.publicSessionId = response.publicSessionId;
         this.sessionStore?.setPublicSessionId(response.publicSessionId);
@@ -661,7 +704,9 @@ export class GranitSiteWidgetElement extends LitElement {
             type: "visitor.saved",
             messageId,
             publicMessageId: response.publicMessageId,
-            acceptanceStatus: response.acceptanceStatus
+            acceptanceStatus: response.acceptanceStatus,
+            submittedAt: response.submittedAt,
+            awaitingAi: response.status === "processing"
           },
           this.config
         );
@@ -669,7 +714,9 @@ export class GranitSiteWidgetElement extends LitElement {
         this.state = applyWidgetAction(this.state, { type: "visitor.mocked", messageId }, this.config);
       }
 
-      if (response.status === "replied") {
+      if (response.status === "processing") {
+        this.startHistoryPolling(response.pollAfterMs);
+      } else if (response.status === "replied") {
         if (!response.replyText) throw new Error("Widget replied response is missing reply text");
         this.state = applyWidgetAction(
           this.state,
@@ -722,6 +769,10 @@ export class GranitSiteWidgetElement extends LitElement {
     const activeController = this.abortController;
     this.abortController = undefined;
     activeController?.abort();
+    this.historyEpoch += 1;
+    const historyController = this.historyAbortController;
+    this.historyAbortController = undefined;
+    historyController?.abort();
     if (markPendingAsError && this.state.pending && this.state.submitting) {
       this.state = applyWidgetAction(
         this.state,
@@ -729,6 +780,120 @@ export class GranitSiteWidgetElement extends LitElement {
         this.config
       );
     }
+  }
+
+  private startHistoryPolling(initialDelayMs: number): void {
+    if (!this.publicSessionId || this.config.mock || !this.isConnected) return;
+    this.historyAbortController?.abort();
+    const controller = new AbortController();
+    const epoch = ++this.historyEpoch;
+    this.historyAbortController = controller;
+    void this.pollHistory(epoch, controller, initialDelayMs);
+  }
+
+  private async pollHistory(
+    epoch: number,
+    controller: AbortController,
+    initialDelayMs: number
+  ): Promise<void> {
+    let delayMs = Math.max(0, initialDelayMs);
+    let failureCount = 0;
+
+    while (
+      epoch === this.historyEpoch &&
+      this.historyAbortController === controller &&
+      !controller.signal.aborted &&
+      this.isConnected
+    ) {
+      try {
+        if (delayMs > 0) await abortableDelay(delayMs, controller.signal);
+        const history = await fetchSiteWidgetHistory(
+          this.config,
+          this.publicSessionId,
+          controller.signal
+        );
+        if (history.publicSessionId !== this.publicSessionId) {
+          throw new Error("Invalid site_widget.history.v2 response: public_session_id_mismatch");
+        }
+
+        failureCount = 0;
+        const awaitingAi =
+          history.pollAfterMs !== undefined ||
+          history.messages.some(
+            (message) =>
+              message.automation?.status === "pending" ||
+              message.automation?.status === "processing" ||
+              message.automation?.status === "retrying"
+          );
+        this.state = applyWidgetAction(
+          this.state,
+          {
+            type: "history.synced",
+            messages: history.messages,
+            awaitingAi,
+            conversationState: history.conversationState
+          },
+          this.config
+        );
+
+        if (!awaitingAi) {
+          if (
+            history.conversationState === "manager_pending" ||
+            history.conversationState === "manager_active"
+          ) {
+            this.state = applyWidgetAction(
+              this.state,
+              { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
+              this.config
+            );
+          } else {
+            const terminal = [...history.messages]
+              .reverse()
+              .find((message) =>
+                message.automation &&
+                (message.automation.status === "degraded" ||
+                  message.automation.status === "failed" ||
+                  message.automation.status === "blocked")
+              );
+            if (terminal?.automation?.status === "blocked") {
+              this.state = applyWidgetAction(
+                this.state,
+                { type: "system.message", text: this.config.disabledMessage, status: "disabled" },
+                this.config
+              );
+            } else if (terminal) {
+              this.state = applyWidgetAction(
+                this.state,
+                { type: "system.message", text: this.config.fallbackMessage, status: "fallback" },
+                this.config
+              );
+            }
+          }
+        }
+
+        this.requestUpdate();
+        if (!awaitingAi) break;
+        delayMs = history.pollAfterMs ?? 700;
+      } catch (error) {
+        if (controller.signal.aborted || epoch !== this.historyEpoch) return;
+        if (error instanceof Error && error.message.includes("HTTP 404")) {
+          this.sessionStore?.clearPublicSessionId();
+          this.publicSessionId = "";
+          this.state = applyWidgetAction(this.state, { type: "session.cleared" }, this.config);
+          this.requestUpdate();
+          break;
+        }
+        failureCount += 1;
+        delayMs = Math.min(500 * 2 ** Math.min(failureCount, 3), 4_000);
+        if (failureCount === 1) {
+          emitSiteWidgetEvent(this, "error", this.config, {
+            errorMessage: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+    }
+
+    if (this.historyAbortController === controller) this.historyAbortController = undefined;
   }
 
   private buildContact(): SiteWidgetContact | undefined {
@@ -773,4 +938,26 @@ export class GranitSiteWidgetElement extends LitElement {
     await this.updateComplete;
     this.renderRoot.querySelector<HTMLButtonElement>(".launcher")?.focus();
   }
+}
+
+function sameStringArrays(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(done, Math.max(0, delayMs));
+    const handleAbort = () => {
+      globalThis.clearTimeout(timeout);
+      signal.removeEventListener("abort", handleAbort);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    function done() {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
 }

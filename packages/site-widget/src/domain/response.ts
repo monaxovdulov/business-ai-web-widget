@@ -14,7 +14,9 @@ const FALLBACK_REASONS = new Set([
   "grounding_validation_failed",
   "turn_timeout",
   "agent_reply_blocked",
-  "ai_persistence_unconfirmed"
+  "ai_persistence_unconfirmed",
+  "worker_failed",
+  "handoff"
 ]);
 
 const ROOT_KEYS = [
@@ -34,8 +36,39 @@ const DISABLED_AUTOMATION_KEYS = ["status", "next_step"] as const;
 const DISCLOSURE_KEYS = ["shown", "version", "text"] as const;
 const REPLY_KEYS = ["public_message_id", "sender_role", "text"] as const;
 
+const V2_ROOT_KEYS = [
+  "ok",
+  "schema_version",
+  "status",
+  "public_session_id",
+  "public_conversation_id",
+  "public_message_id",
+  "submitted_at",
+  "action",
+  "automation",
+  "message_to_user"
+] as const;
+const V2_PROCESSING_KEYS = ["status", "next_step", "conversation_state", "poll_after_ms"] as const;
+const V2_DISABLED_KEYS = ["status", "next_step", "conversation_state"] as const;
+const V2_REPLIED_KEYS = ["status", "next_step", "conversation_state"] as const;
+const V2_DEGRADED_KEYS = ["status", "next_step", "conversation_state", "reason"] as const;
+const V2_MANAGER_KEYS = ["status", "next_step", "conversation_state", "reason"] as const;
+
 export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): SiteWidgetServerResponseViewModel {
   const record = requireRecord(body, "root");
+
+  if (record.schema_version === "site_widget.v2") {
+    return mapSiteWidgetV2Response(record, body, config);
+  }
+
+  return mapSiteWidgetV1Response(record, body, config);
+}
+
+function mapSiteWidgetV1Response(
+  record: Record<string, unknown>,
+  body: unknown,
+  config: SiteWidgetConfig
+): SiteWidgetServerResponseViewModel {
   requireExactKeys(record, ROOT_KEYS, "root");
   if (record.ok !== true) protocolError("ok");
   if (record.schema_version !== "site_widget.v1") protocolError("schema_version");
@@ -125,6 +158,96 @@ export function mapSiteWidgetResponse(body: unknown, config: SiteWidgetConfig): 
   protocolError("automation.status");
 }
 
+function mapSiteWidgetV2Response(
+  record: Record<string, unknown>,
+  body: unknown,
+  config: SiteWidgetConfig
+): SiteWidgetServerResponseViewModel {
+  requireExactKeys(record, V2_ROOT_KEYS, "root");
+  if (record.ok !== true) protocolError("ok", "site_widget.v2");
+  const acceptanceStatus = requireAcceptanceStatus(record.status);
+  if (record.action !== "show_widget_saved") protocolError("action", "site_widget.v2");
+
+  const publicSessionId = requireUuid(record.public_session_id, "public_session_id", "site_widget.v2");
+  const publicConversationId = requireUuid(
+    record.public_conversation_id,
+    "public_conversation_id",
+    "site_widget.v2"
+  );
+  const publicMessageId = requireUuid(record.public_message_id, "public_message_id", "site_widget.v2");
+  const submittedAt = requireIsoDate(record.submitted_at, "submitted_at", "site_widget.v2");
+  const messageToUser = requireString(record.message_to_user, "message_to_user");
+  const automation = requireRecord(record.automation, "automation");
+  const automationStatus = requireString(automation.status, "automation.status");
+  const base = {
+    source: "server" as const,
+    acceptanceStatus,
+    action: "show_widget_saved" as const,
+    publicSessionId,
+    publicConversationId,
+    publicMessageId,
+    submittedAt,
+    raw: body
+  };
+
+  if (automationStatus === "processing") {
+    requireExactKeys(automation, V2_PROCESSING_KEYS, "automation");
+    if (automation.next_step !== "poll_history") protocolError("automation.next_step", "site_widget.v2");
+    requireConversationState(automation.conversation_state, ["ai_active"]);
+    return {
+      ...base,
+      status: "processing",
+      pollAfterMs: requireIntegerRange(automation.poll_after_ms, "automation.poll_after_ms", 250, 5_000)
+    };
+  }
+
+  if (automationStatus === "replied") {
+    requireExactKeys(automation, V2_REPLIED_KEYS, "automation");
+    if (automation.next_step !== "history_available") protocolError("automation.next_step", "site_widget.v2");
+    requireConversationState(automation.conversation_state, ["ai_active", "manager_pending"]);
+    return { ...base, status: "processing", pollAfterMs: 0 };
+  }
+
+  if (automationStatus === "disabled") {
+    requireExactKeys(automation, V2_DISABLED_KEYS, "automation");
+    if (automation.next_step !== "manager_review") protocolError("automation.next_step", "site_widget.v2");
+    requireConversationState(automation.conversation_state, ["manager_pending"]);
+    return {
+      ...base,
+      status: "disabled",
+      systemText: messageToUser.trim() || config.disabledMessage
+    };
+  }
+
+  if (automationStatus === "degraded") {
+    requireExactKeys(automation, V2_DEGRADED_KEYS, "automation");
+    if (automation.next_step !== "retry_or_manager") protocolError("automation.next_step", "site_widget.v2");
+    requireConversationState(automation.conversation_state, ["ai_active"]);
+    const reason = requireFallbackReason(automation.reason, "site_widget.v2");
+    return {
+      ...base,
+      status: "fallback",
+      systemText: messageToUser.trim() || config.fallbackMessage,
+      reason
+    };
+  }
+
+  if (automationStatus === "manager_pending") {
+    requireExactKeys(automation, V2_MANAGER_KEYS, "automation");
+    if (automation.next_step !== "manager_review") protocolError("automation.next_step", "site_widget.v2");
+    requireConversationState(automation.conversation_state, ["manager_pending", "manager_active"]);
+    const reason = requireFallbackReason(automation.reason, "site_widget.v2");
+    return {
+      ...base,
+      status: "fallback",
+      systemText: messageToUser.trim() || config.fallbackMessage,
+      reason
+    };
+  }
+
+  protocolError("automation.status", "site_widget.v2");
+}
+
 function requireAcceptanceStatus(value: unknown): SiteWidgetAcceptanceStatus {
   if (value === "accepted" || value === "replayed") return value;
   return protocolError("status");
@@ -136,8 +259,8 @@ function requireConversationState(value: unknown, allowedStates: readonly string
   return state;
 }
 
-function requireUuid(value: unknown, field: string): string {
-  return normalizePublicUuid(value) ?? protocolError(field);
+function requireUuid(value: unknown, field: string, version = "site_widget.v1"): string {
+  return normalizePublicUuid(value) ?? protocolError(field, version);
 }
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {
@@ -170,6 +293,30 @@ function requireBoundedString(value: unknown, field: string, maxLength: number):
   return normalized || protocolError(field);
 }
 
-function protocolError(field: string): never {
-  throw new Error(`Invalid site_widget.v1 response: ${field}`);
+function requireIsoDate(value: unknown, field: string, version: string): string {
+  const raw = requireString(value, field);
+  if (!raw || !Number.isFinite(Date.parse(raw))) protocolError(field, version);
+  return raw;
+}
+
+function requireIntegerRange(
+  value: unknown,
+  field: string,
+  minimum: number,
+  maximum: number
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
+    protocolError(field, "site_widget.v2");
+  }
+  return value;
+}
+
+function requireFallbackReason(value: unknown, version: string): string {
+  const reason = requireString(value, "automation.reason");
+  if (!FALLBACK_REASONS.has(reason)) protocolError("automation.reason", version);
+  return reason;
+}
+
+function protocolError(field: string, version = "site_widget.v1"): never {
+  throw new Error(`Invalid ${version} response: ${field}`);
 }

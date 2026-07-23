@@ -5,6 +5,8 @@ describe("loader data parsing", () => {
   it("maps script data attributes to mount options", () => {
     const script = document.createElement("script");
     script.dataset.widgetInstanceId = "memorial-main";
+    script.dataset.conversationScopeId = "memorial-customer";
+    script.dataset.legacyConversationScopeIds = "memorial-main, memorial-catalog, memorial-main";
     script.dataset.apiBaseUrl = "https://ops.example.com";
     script.dataset.mock = "true";
     script.dataset.open = "1";
@@ -14,6 +16,8 @@ describe("loader data parsing", () => {
 
     expect(readLoaderOptions(script.dataset)).toMatchObject({
       widgetInstanceId: "memorial-main",
+      conversationScopeId: "memorial-customer",
+      legacyConversationScopeIds: ["memorial-main", "memorial-catalog", "memorial-main"],
       apiBaseUrl: "https://ops.example.com",
       mock: true,
       open: true,

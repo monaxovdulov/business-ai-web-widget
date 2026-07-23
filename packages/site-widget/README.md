@@ -14,6 +14,8 @@ the same origin as the page:
   defer
   src="/vendor/granit/site-widget/v1.0.0/loader.js"
   data-widget-instance-id="memorial-main"
+  data-conversation-scope-id="memorial-customer"
+  data-legacy-conversation-scope-ids="memorial-main,memorial-catalog"
   data-api-base-url="https://ops.example.com"
   data-theme="memorial-soft"
   data-panel-size="normal">
@@ -25,6 +27,14 @@ to its own `src`, and mounts the widget into `document.body`. Replace the
 example API origin only with an approved environment value. Production must
 not set mock or attachment-preview flags.
 
+`widgetInstanceId` identifies the individual mount and remains visible in the
+request source metadata. `conversationScopeId` independently selects the
+browser namespace for `public_session_id`, so several pages can continue one
+conversation without sharing page-specific open state or panel size. Ordered
+`legacyConversationScopeIds` are consulted once when the canonical scope is
+empty; the first valid backend UUID wins, conversations are never merged, and
+legacy keys remain available for rollback.
+
 ## Direct Web Component
 
 ```html
@@ -32,6 +42,8 @@ not set mock or attachment-preview flags.
 
 <granit-site-widget
   widget-instance-id="memorial-main"
+  conversation-scope-id="memorial-customer"
+  legacy-conversation-scope-ids="memorial-main,memorial-catalog"
   api-base-url="https://ops.example.com"
   theme="memorial-soft"
   panel-size="normal">
@@ -59,6 +71,8 @@ defineSiteWidget();
 
 const widget = mountSiteWidget({
   widgetInstanceId: "memorial-main",
+  conversationScopeId: "memorial-customer",
+  legacyConversationScopeIds: ["memorial-main", "memorial-catalog"],
   apiBaseUrl: "https://ops.example.com",
   theme: "memorial-soft",
   panelSize: "normal"
@@ -79,18 +93,27 @@ The widget sends:
 POST /public/intake/site-widget/messages
 ```
 
-with `schema_version: "site_widget.v1"` and
+with `schema_version: "site_widget.v2"` and
 `event_type: "site_widget.message_submitted"`.
 
 The browser marks the visitor bubble as saved only after a successful response
-strictly confirms `schema_version="site_widget.v1"`, root
-`status="accepted"|"replayed"`, `action="show_widget_saved"`, a valid public
-session UUID and a valid visitor public message UUID. It renders AI text only
-when the same receipt has `automation.status="replied"`, a distinct persisted
-reply UUID, `sender_role="ai_assistant"`, disclosure and non-empty reply text.
+strictly confirms `schema_version="site_widget.v2"`, root
+`status="accepted"|"replayed"`, `action="show_widget_saved"`, valid public
+session/conversation/message UUIDs and an authoritative server `submitted_at`.
+`automation.status="processing"` releases the composer immediately and starts
+bounded polling of `site_widget.history.v2`. Only persisted history can create
+assistant bubbles, timestamps, terminal states, or verified catalog links.
 Protocol mismatches keep the original visitor bubble retryable and never render
-the unconfirmed AI text. `fallback` and `disabled` use the contract-compatible
-manager-review marker.
+unconfirmed AI text. The legacy `site_widget.v1` response parser remains for a
+backend-first rollout window.
+
+The pending metadata row shows `✓ Отправлено` as soon as the browser dispatches
+the request. A durable server acknowledgment reconciles it to `✓✓ Принято` and
+starts a separate typing indicator while AI work is active; neither state means
+that a manager read the message. AI disclosure appears once per dialogue.
+History adds authoritative semantic `<time>` values, full accessible Russian
+date/time labels, midnight-safe date separators and relative allowlisted
+catalog deep links; raw URLs remain hidden from assistant copy.
 
 The consumer integration budget fixes the total server deadline at 20 seconds:
 15 seconds for the provider plus a bounded 5-second network/persistence
@@ -98,7 +121,7 @@ allowance. The default browser deadline is 25 seconds, configuration is
 normalized to at least 20,001 ms, and the fetch is actually aborted when that
 browser deadline expires.
 
-`site_widget.v1` is strict text-only JSON. Production never renders a photo
+`site_widget.v2` is strict text-only JSON. Production never renders a photo
 picker and never adds attachments, filenames, MIME values, `blob:` URLs, or
 base64 to requests, events, or storage. The frontend does not know the AI
 qualification workflow, its fields, completion criteria, or number of turns;
@@ -120,12 +143,11 @@ mountSiteWidget({
 The mock accepts up to three JPEG, PNG, or WebP images (5 MiB each, 15 MiB
 total), validates signatures and decoded pixel count, and keeps object URLs
 only in tab memory. Text remains required. The preview can move into a mock
-visitor bubble, but the v1 request remains text-only. After a local build, see
+visitor bubble, but the v2 request remains text-only. After a local build, see
 `examples/mock-photo-preview.html` through `npm run serve:local`.
 
-Production photos require a separate upload endpoint and `site_widget.v2` with
-opaque normalized `upload_id` references; browser metadata must remain
-untrusted.
+Production photos require a separate future upload contract with opaque
+normalized `upload_id` references; browser metadata must remain untrusted.
 
 ## Chat behavior and styling
 
@@ -141,6 +163,7 @@ variables are `--sw-panel-normal-width` (520px) and
 
 ```text
 message-root message-bubble message-meta message-status message-actions
+message-links message-link date-separator typing-indicator
 marker marker-icon marker-text message-viewport jump-latest
 attachment-list attachment attachment-preview attachment-remove
 ```
