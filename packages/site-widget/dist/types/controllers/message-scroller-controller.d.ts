@@ -44,6 +44,7 @@ export declare class MessageScrollerController implements ReactiveController {
     private programmaticClearTimer;
     private settlingTimer;
     private pointerActive;
+    private lastScrollTop;
     constructor(host: ReactiveControllerHost);
     hostUpdate(): void;
     hostDisconnected(): void;
