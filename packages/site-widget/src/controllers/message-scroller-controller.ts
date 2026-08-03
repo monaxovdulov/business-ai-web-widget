@@ -73,6 +73,7 @@ export class MessageScrollerController implements ReactiveController {
   private programmaticClearTimer: number | undefined;
   private settlingTimer: number | undefined;
   private pointerActive = false;
+  private lastScrollTop = 0;
 
   constructor(host: ReactiveControllerHost) {
     this.host = host;
@@ -104,6 +105,7 @@ export class MessageScrollerController implements ReactiveController {
     this.viewport = viewport;
     this.content = content;
     this.tailSpacer = tailSpacer;
+    this.lastScrollTop = viewport.scrollTop;
 
     viewport.addEventListener("scroll", this.handleScroll, { passive: true });
     viewport.addEventListener("wheel", this.handleWheel, { passive: true });
@@ -199,6 +201,7 @@ export class MessageScrollerController implements ReactiveController {
     this.hasInitialPlacement = false;
     this.pointerActive = false;
     this.programmaticScroll = false;
+    this.lastScrollTop = 0;
   }
 
   getSnapshot(): MessageScrollerSnapshot {
@@ -401,11 +404,20 @@ export class MessageScrollerController implements ReactiveController {
   };
 
   private handleScroll = (): void => {
-    if (this.pointerActive && !this.programmaticScroll) this.releaseForUser();
     const viewport = this.viewport;
+    if (!viewport) {
+      this.updateSnapshot();
+      return;
+    }
+
+    const movingUp = viewport.scrollTop < this.lastScrollTop - SCROLL_EPSILON;
+    this.lastScrollTop = viewport.scrollTop;
+    const userScroll = !this.programmaticScroll;
+    if (userScroll && (this.pointerActive || movingUp)) this.releaseForUser();
+
     if (
-      viewport &&
-      !this.programmaticScroll &&
+      userScroll &&
+      !movingUp &&
       this.mode === "free-scrolling" &&
       this.distanceToEnd(viewport) <= SCROLL_EDGE_THRESHOLD
     ) {

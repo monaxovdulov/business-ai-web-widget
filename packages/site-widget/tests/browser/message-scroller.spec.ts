@@ -96,6 +96,30 @@ test("wheel и keyboard освобождают чтение, latest возвра
   expect(await scrollCalls(page)).toContain("smooth");
 });
 
+test("медленные wheel-шаги вверх не возвращают viewport к live edge", async ({ page }) => {
+  await reset(page, rows("message", 18, 64));
+  const viewport = page.getByTestId("viewport");
+  const initial = await metrics(page);
+
+  await viewport.hover();
+  for (let step = 0; step < 3; step += 1) {
+    await page.mouse.wheel(0, -2);
+  }
+
+  await expect
+    .poll(async () => initial.scrollTop - (await metrics(page)).scrollTop)
+    .toBeGreaterThanOrEqual(4);
+  await expectSnapshot(page, (value) => value.mode === "free-scrolling");
+
+  const readingPosition = await metrics(page);
+  await append(page, [{ id: "new-while-reading", height: 64 }]);
+  expect(Math.abs((await metrics(page)).scrollTop - readingPosition.scrollTop)).toBeLessThanOrEqual(1);
+
+  await page.mouse.wheel(0, 80);
+  await expectAtEnd(page);
+  await expectSnapshot(page, (value) => value.mode === "following-bottom");
+});
+
 test("turn anchor держит reading line и расходует tail spacer", async ({ page }) => {
   await reset(page, rows("message", 12, 58));
   await append(page, [{ id: "visitor-turn", height: 64, scrollAnchor: true }]);
