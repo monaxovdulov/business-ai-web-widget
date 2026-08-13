@@ -173,6 +173,30 @@ backend URL и стабильный instance id, например по форм�
 `loader.js` и `site-widget.esm.js` должны лежать рядом: loader вычисляет ESM URL относительно
 собственного `src`.
 
+### 4.8 Связанный follow-up: Mastra + observability
+
+Этот follow-up зафиксирован владельцем 2026-07-14, но не расширяет scope текущего релиза.
+После приёмки `site-widget.v1` следующий AI-путь планируется отдельно:
+
+```text
+site-widget.v1 acceptance
+  -> neutral AI boundary + app-owned quality/trace foundation
+  -> Mastra runtime + observability на staging
+  -> S08 Telegram AI parity
+  -> S10 bad dialog -> sanitized eval -> regression
+```
+
+Источник истины остаётся в `granit-operations` Postgres/app services. Mastra не получает
+direct send, direct business-state writes или право обходить app-owned send-time gate.
+Публичный Mastra Studio не одобрен.
+
+Подробный дизайн:
+`docs/superpowers/specs/2026-07-14-mastra-observability-follow-up-design.md`.
+
+Этот пункт не разрешает backend/AI implementation, staging deploy AI или production
+enablement внутри goal `site-widget.v1`; для них нужен отдельный implementation plan и
+соответствующие approval/evidence gates.
+
 ## 5. Жёсткие границы scope
 
 ### Входит в goal
